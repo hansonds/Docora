@@ -217,7 +217,7 @@ class ToolsActivity : BaseActivity() {
     private fun doneMany(files: List<File>) {
         MaterialAlertDialogBuilder(this)
             .setTitle("Done")
-            .setMessage("${files.size} PDF files saved.\nThey are in Recent files and in Downloads › PDF ScanSign.")
+            .setMessage("${files.size} PDF files saved.\nThey are in Recent files and in Downloads › Docora.")
             .setPositiveButton("OK") { _, _ -> finish() }
             .show()
     }
@@ -271,7 +271,7 @@ class ToolsActivity : BaseActivity() {
                     PdfTools.toImages(this, input.file, input.base, if (c == 0) 150 else 300, p)
                 }) { n ->
                     MaterialAlertDialogBuilder(this).setTitle("Done")
-                        .setMessage("$n images saved to Pictures › PDF ScanSign (see your Gallery).")
+                        .setMessage("$n images saved to Pictures › Docora (see your Gallery).")
                         .setPositiveButton("OK", null).show()
                 }
             }

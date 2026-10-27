@@ -13,7 +13,7 @@ class App : Application() {
         openCvReady = try {
             OpenCVLoader.initLocal()
         } catch (t: Throwable) {
-            Log.e("ScanSign", "OpenCV initLocal failed", t)
+            Log.e("Docora", "OpenCV initLocal failed", t)
             false
         }
         if (!openCvReady) {
@@ -22,7 +22,7 @@ class App : Application() {
                 System.loadLibrary("opencv_java4")
                 true
             } catch (t: Throwable) {
-                Log.e("ScanSign", "OpenCV native library missing", t)
+                Log.e("Docora", "OpenCV native library missing", t)
                 false
             }
         }

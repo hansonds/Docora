@@ -10,6 +10,7 @@
         style="@style/Widget.App.Toolbar"
         android:layout_width="match_parent"
         android:layout_height="?attr/actionBarSize"
+        app:subtitle="PDF Editor &amp; Scanner"
         app:title="@string/app_name" />
 
     <androidx.core.widget.NestedScrollView

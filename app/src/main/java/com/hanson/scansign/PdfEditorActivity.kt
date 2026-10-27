@@ -668,6 +668,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         m.add(0, 1, 0, "Undo").setIcon(R.drawable.ic_undo).setShowAsAction(always)
         m.add(0, 2, 1, "Redo").setIcon(R.drawable.ic_redo).setShowAsAction(always)
         m.add(0, 3, 2, "Save").setIcon(R.drawable.ic_save).setShowAsAction(always)
+        m.add(0, 10, 3, "Compress").setIcon(R.drawable.ic_compress).setShowAsAction(always)
         m.add(0, 5, 4, "Share…")
         m.add(0, 8, 5, "Print")
         m.add(0, 9, 6, "Night reading").apply { isCheckable = true; isChecked = getSharedPreferences("view", MODE_PRIVATE).getBoolean("night", false) }
@@ -678,6 +679,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                 1 -> undo()
                 2 -> redo()
                 3 -> if (requireEditable()) quickSave()
+                10 -> compressCurrent()
                 4 -> goToPageDialog()
                 5 -> shareCurrent()
                 8 -> printCurrent()
@@ -768,6 +770,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         toolButton(bar, "Get text", R.drawable.ic_ocr) { setTool(ActiveTool.NONE); extractText() }
         toolButton(bar, "Go to", R.drawable.ic_pdf) { goToPageDialog() }
         toolButton(bar, "Save", R.drawable.ic_save) { if (requireEditable()) { setTool(ActiveTool.NONE); quickSave() } }
+        toolButton(bar, "Compress", R.drawable.ic_compress) { setTool(ActiveTool.NONE); compressCurrent() }
         toolButton(bar, "Share", R.drawable.ic_share) { setTool(ActiveTool.NONE); shareCurrent() }
         toolButton(bar, "Print", R.drawable.ic_print) { setTool(ActiveTool.NONE); printCurrent() }
     }
@@ -946,12 +949,44 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     /** Original location of a PDF opened from another app / the file picker. */
     private var sourceUri: android.net.Uri? = null
     private var pendingCopy: Pair<String, Boolean>? = null
+    private var pendingPrepared: File? = null
+
+    /**
+     * Compress: (includes unsaved edits) -> pick a size with real file sizes -> Replace original or Save as new copy.
+     */
+    private fun compressCurrent() {
+        commitEdit()
+        val p = pdf ?: return
+        if (!p.editable) { Toast.makeText(this, "This PDF can't be edited", Toast.LENGTH_SHORT).show(); return }
+        doc.select(null)
+        setLoading(true, if (dirty) "Applying your edits…" else "Preparing…")
+        val snapshot = items.map { it.copy() }
+        val includeEdits = dirty
+        lifecycleScope.launch {
+            val base = withContext(Dispatchers.IO) {
+                try {
+                    if (includeEdits) Storage.newWorkFile(this@PdfEditorActivity, "pdf").also { PdfSaver.save(p, it, snapshot, false) }
+                    else p.file
+                } catch (e: Throwable) { null }
+            }
+            setLoading(false, null)
+            if (base == null) { Toast.makeText(this@PdfEditorActivity, "Could not prepare the PDF", Toast.LENGTH_LONG).show(); return@launch }
+            ShareSheet.compress(this@PdfEditorActivity, base, displayName) { compressed ->
+                lifecycleScope.launch {
+                    val writable = inLibrary() || withContext(Dispatchers.IO) { canWriteBack() }
+                    showSaveSheet(writable, thenOrganize = false, thenShare = false, thenFinish = false, prepared = compressed)
+                }
+            }
+        }
+    }
 
     private val createDoc = registerForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
         val pc = pendingCopy ?: return@registerForActivityResult
         pendingCopy = null
         if (uri == null) return@registerForActivityResult
-        performSave(Storage.uniquePdf(this, pc.first), overwrite = false, flatten = pc.second, export = false, copyTo = uri, showDialog = true)
+        val prep = pendingPrepared
+        pendingPrepared = null
+        performSave(Storage.uniquePdf(this, pc.first), overwrite = false, flatten = pc.second, export = false, copyTo = uri, showDialog = true, prepared = prep)
     }
 
     private fun baseName() = displayName.removeSuffix(".pdf").removeSuffix(".PDF")
@@ -989,7 +1024,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
 
     private fun saveDialog(thenOrganize: Boolean = false) = quickSave(thenOrganize = thenOrganize)
 
-    private fun showSaveSheet(canReplace: Boolean, thenOrganize: Boolean, thenShare: Boolean, thenFinish: Boolean) {
+    private fun showSaveSheet(canReplace: Boolean, thenOrganize: Boolean, thenShare: Boolean, thenFinish: Boolean, prepared: File? = null) {
         val p = pdf ?: return
         val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
         val v = LayoutInflater.from(this).inflate(R.layout.sheet_save, null)
@@ -1016,7 +1051,11 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         val where = v.findViewById<ChipGroup>(R.id.where)
         val flatten = v.findViewById<MaterialSwitch>(R.id.flatten)
         val btn = v.findViewById<MaterialButton>(R.id.btnSave)
-        flatten.visibility = if (p.fields.isNotEmpty()) View.VISIBLE else View.GONE
+        flatten.visibility = if (p.fields.isNotEmpty() && prepared == null) View.VISIBLE else View.GONE
+        if (prepared != null) {
+            v.findViewById<TextView>(R.id.fileName).text =
+                "Compressed: ${android.text.format.Formatter.formatShortFileSize(this, prepared.length())}  ·  $displayName"
+        }
 
         fun setup(card: View, title: String, sub: String, icon: Int, badge: Boolean) {
             card.findViewById<TextView>(R.id.title).text = title
@@ -1037,7 +1076,8 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
 
         val prefs = getSharedPreferences("save", MODE_PRIVATE)
         var useReplace = canReplace && prefs.getBoolean("replace", true)
-        nameField.setText(baseName().let { if (it.endsWith("_signed")) it else it + "_signed" })
+        val suffix = if (prepared != null) "_compressed" else "_signed"
+        nameField.setText(baseName().let { if (it.endsWith(suffix)) it else it + suffix })
 
         fun refresh() {
             for ((card, sel) in listOf(replace to useReplace, copy to !useReplace)) {
@@ -1063,22 +1103,23 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             sheet.dismiss()
             val lock = flatten.isChecked
             if (useReplace) {
-                if (inLibrary()) performSave(source, overwrite = true, flatten = lock, export = false, copyTo = null, showDialog = false)
-                else performSave(source, overwrite = true, flatten = lock, export = false, copyTo = sourceUri, showDialog = false)
+                if (inLibrary()) performSave(source, overwrite = true, flatten = lock, export = false, copyTo = null, showDialog = false, prepared = prepared)
+                else performSave(source, overwrite = true, flatten = lock, export = false, copyTo = sourceUri, showDialog = false, prepared = prepared)
             } else {
                 val n = Storage.cleanName(nameField.text.toString())
                 if (where.checkedChipId == R.id.wherePick) {
                     pendingCopy = Pair(n, lock)
+                    pendingPrepared = prepared
                     try { createDoc.launch("$n.pdf") } catch (e: Exception) { Toast.makeText(this, "No file picker available", Toast.LENGTH_SHORT).show() }
                 } else {
-                    performSave(Storage.uniquePdf(this, n), overwrite = false, flatten = lock, export = true, copyTo = null, showDialog = !thenFinish && !thenShare && !thenOrganize)
+                    performSave(Storage.uniquePdf(this, n), overwrite = false, flatten = lock, export = true, copyTo = null, showDialog = !thenFinish && !thenShare && !thenOrganize, prepared = prepared)
                 }
             }
         }
         sheet.show()
     }
 
-    private fun performSave(target: File, overwrite: Boolean, flatten: Boolean, export: Boolean, copyTo: android.net.Uri?, showDialog: Boolean) {
+    private fun performSave(target: File, overwrite: Boolean, flatten: Boolean, export: Boolean, copyTo: android.net.Uri?, showDialog: Boolean, prepared: File? = null) {
         val p = pdf ?: return
         doc.select(null)
         setLoading(true, "Saving…")
@@ -1087,7 +1128,8 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             val result = withContext(Dispatchers.IO) {
                 try {
                     val tmp = if (overwrite) Storage.newWorkFile(this@PdfEditorActivity, "pdf") else target
-                    PdfSaver.save(p, tmp, snapshot, flatten)
+                    if (prepared != null) prepared.copyTo(tmp, overwrite = true)
+                    else PdfSaver.save(p, tmp, snapshot, flatten)
                     if (overwrite) {
                         // atomic replace; the viewer keeps reading the old file until we reload
                         if (!tmp.renameTo(target)) { tmp.copyTo(target, overwrite = true); tmp.delete() }
@@ -1128,13 +1170,14 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                     .setTitle("Saved")
                     .setMessage(file.name +
                         (if (copied) "\n\nSaved to the folder you chose." else "") +
-                        (if (exported) "\n\nA copy is in Downloads › PDF ScanSign." else ""))
+                        (if (exported) "\n\nA copy is in Downloads › Docora." else ""))
                     .setPositiveButton("Share") { _, _ -> Ui.share(this@PdfEditorActivity, file) }
                     .setNeutralButton("Print") { _, _ -> Ui.print(this@PdfEditorActivity, file) }
                     .setNegativeButton("Keep editing", null)
                     .show()
                 else -> Toast.makeText(this@PdfEditorActivity,
-                    if (exported) "Saved · copy in Downloads › PDF ScanSign" else "Saved", Toast.LENGTH_SHORT).show()
+                    (if (prepared != null) "Compressed & saved · ${android.text.format.Formatter.formatShortFileSize(this@PdfEditorActivity, file.length())}" else "Saved") +
+                        (if (exported) " · copy in Downloads › Docora" else ""), Toast.LENGTH_LONG).show()
             }
         }
     }

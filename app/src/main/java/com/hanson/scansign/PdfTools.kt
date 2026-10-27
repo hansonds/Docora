@@ -500,7 +500,7 @@ object PdfTools {
 
     // ---------------- PDF -> images ----------------
 
-    /** Saves every page as a JPEG in Pictures/PDF ScanSign. Returns how many were saved. */
+    /** Saves every page as a JPEG in Pictures/Docora. Returns how many were saved. */
     fun toImages(ctx: Context, display: File, baseName: String, dpi: Int, progress: Progress?): Int {
         var saved = 0
         ParcelFileDescriptor.open(display, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
@@ -531,13 +531,13 @@ object PdfTools {
                 val values = ContentValues().apply {
                     put(MediaStore.Images.Media.DISPLAY_NAME, name)
                     put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-                    put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/PDF ScanSign")
+                    put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Docora")
                 }
                 val uri = ctx.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return false
                 ctx.contentResolver.openOutputStream(uri)?.use { bmp.compress(Bitmap.CompressFormat.JPEG, 92, it) }
                 true
             } else {
-                val dir = File(ctx.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "PDF ScanSign").apply { mkdirs() }
+                val dir = File(ctx.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "Docora").apply { mkdirs() }
                 File(dir, name).outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 92, it) }
                 true
             }
