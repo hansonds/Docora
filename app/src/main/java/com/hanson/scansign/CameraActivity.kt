@@ -95,10 +95,6 @@ class CameraActivity : BaseActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // phones: portrait camera; tablets can rotate freely
-        if (resources.configuration.smallestScreenWidthDp < 600) {
-            requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-        }
         setContentView(R.layout.activity_camera)
         previewView = findViewById(R.id.preview)
         overlay = findViewById(R.id.overlay)
