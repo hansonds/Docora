@@ -2,25 +2,29 @@
 
 Android app to scan documents, sign PDFs and fill PDF forms. By Hanson · [phoenicx.org](https://phoenicx.org)
 
+Everything is free: no ads, no watermark, no account, works offline.
+
 **Scanning**
-- In-app camera with live page edge detection and auto capture (hold steady), torch, page-by-page loop
-- Import from photos (many at once)
-- Manual corner/edge adjustment with magnifier; perspective correction
-- Filters: Magic color (removes shadows), Original, Grayscale, Black & white
-- Multi-page PDF: reorder, rotate, re-crop, delete; A4 / Letter / fit; 3 quality levels
+- AI scanner (Google ML Kit, on-device): best-in-class edge detection, auto capture, removes shadows / stains / fingers
+- Built-in camera with live edge detection and auto capture (backup, selectable in Settings)
+- Import photos; manual corner adjustment with magnifier; filters (Magic color, B&W, Grayscale)
+- Multi-page PDF, A4 / Letter / fit, quality levels, ID-card layout (2 sides on one page)
+- Searchable PDFs: on-device OCR adds an invisible text layer
 
-**PDF editor** (any PDF: large 1000+ page files, password-protected, damaged files repaired)
-- Smooth continuous scrolling, pinch / double-tap / button zoom with sharp re-rendering
-- Fast-scroll handle and Go-to-page for long documents
-- Fill PDF forms: text, checkboxes, radio buttons, dropdowns, signature fields; option to lock (flatten)
-- Add signatures anywhere (drag, pinch or handle to resize, × to remove)
-- Add text with font, size, colour and bold; "insert today's date"; works with any language
+**PDF editor** (any PDF: 1000+ pages, password-protected, damaged)
+- Smooth zoom, fast-scroll, go to page
+- Edit toolbar: Sign, Text, Draw (pen), Highlight, Shapes (box, circle, line, arrow), Whiteout, Image, Stamps (✓ ✗ APPROVED, PAID, date…), Pages, Get text
+- Fill PDF forms in place (text, checkboxes, radio, dropdowns, signature fields), existing answers visible
+- Undo / redo
 
-**Signatures**
-- Photograph a signature on white paper (in-app camera with 4:3 guide) or pick a photo
-- Fixed 4:3 crop, automatic background removal, ink thickness and colour (original / black / blue)
+**PDF tools**
+- Merge, Split (every page / every N / ranges), Extract pages, Organize (drag to reorder, rotate, delete, duplicate, blank page)
+- Compress, PDF → JPG, Images → PDF
+- Extract text (OCR: Latin and Devanagari scripts), Make searchable
+- Lock with password (AES), Remove password
+- Watermark, Page numbers
 
-Saved PDFs appear in the app and in **Downloads › PDF ScanSign**. Works offline, no ads, no account.
+**Library**: search, sort, share, rename. Saved PDFs also go to **Downloads › PDF ScanSign**.
 
 ## Building (GitHub does it for you)
 
