@@ -83,9 +83,9 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnAuto"
-            style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="0dp"
+            style="@style/Widget.App.ToolButton"
             android:layout_height="64dp"
+            android:layout_width="0dp"
             android:layout_weight="1"
             android:text="Auto detect"
             android:textColor="#FFFFFF"
@@ -96,9 +96,9 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnFull"
-            style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="0dp"
+            style="@style/Widget.App.ToolButton"
             android:layout_height="64dp"
+            android:layout_width="0dp"
             android:layout_weight="1"
             android:text="Full image"
             android:textColor="#FFFFFF"
@@ -109,9 +109,9 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnRotate"
-            style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="0dp"
+            style="@style/Widget.App.ToolButton"
             android:layout_height="64dp"
+            android:layout_width="0dp"
             android:layout_weight="1"
             android:text="Rotate"
             android:textColor="#FFFFFF"
@@ -129,9 +129,9 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnBack"
-            style="@style/Widget.Material3.Button.OutlinedButton"
+            style="@style/Widget.App.OutlineButton"
+            android:layout_height="52dp"
             android:layout_width="0dp"
-            android:layout_height="56dp"
             android:layout_marginEnd="8dp"
             android:layout_weight="1"
             android:text="Retake"
@@ -139,8 +139,9 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnNext"
+            style="@style/Widget.App.PrimaryButton"
+            android:layout_height="52dp"
             android:layout_width="0dp"
-            android:layout_height="56dp"
             android:layout_marginStart="8dp"
             android:layout_weight="1"
             android:text="Next" />

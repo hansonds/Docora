@@ -33,9 +33,20 @@
             android:drawablePadding="8dp"
             android:paddingHorizontal="16dp"
             android:paddingVertical="10dp"
-            android:text="This PDF has a form. Tap a highlighted field to fill it."
+            android:text="This PDF has a form. Tap any highlighted field to type or tick it."
             android:textColor="#FFFFFF"
             android:textSize="13sp"
+            android:visibility="gone" />
+
+        <EditText
+            android:id="@+id/fieldEditor"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_field_editor"
+            android:importantForAutofill="no"
+            android:paddingHorizontal="4dp"
+            android:paddingVertical="0dp"
+            android:textColor="#0A143C"
             android:visibility="gone" />
 
         <TextView
@@ -120,9 +131,9 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/toolSign"
-                style="@style/Widget.Material3.Button.TextButton"
-                android:layout_width="0dp"
+                style="@style/Widget.App.ToolButton"
                 android:layout_height="64dp"
+                android:layout_width="0dp"
                 android:layout_weight="1"
                 android:text="Sign"
                 android:textSize="12sp"
@@ -132,9 +143,9 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/toolText"
-                style="@style/Widget.Material3.Button.TextButton"
-                android:layout_width="0dp"
+                style="@style/Widget.App.ToolButton"
                 android:layout_height="64dp"
+                android:layout_width="0dp"
                 android:layout_weight="1"
                 android:text="Text"
                 android:textSize="12sp"
@@ -143,22 +154,10 @@
                 app:iconPadding="2dp" />
 
             <com.google.android.material.button.MaterialButton
-                android:id="@+id/toolForm"
-                style="@style/Widget.Material3.Button.TextButton"
-                android:layout_width="0dp"
-                android:layout_height="64dp"
-                android:layout_weight="1"
-                android:text="Form"
-                android:textSize="12sp"
-                app:icon="@drawable/ic_form"
-                app:iconGravity="top"
-                app:iconPadding="2dp" />
-
-            <com.google.android.material.button.MaterialButton
                 android:id="@+id/toolPage"
-                style="@style/Widget.Material3.Button.TextButton"
-                android:layout_width="0dp"
+                style="@style/Widget.App.ToolButton"
                 android:layout_height="64dp"
+                android:layout_width="0dp"
                 android:layout_weight="1"
                 android:text="Go to"
                 android:textSize="12sp"
@@ -168,9 +167,9 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/toolSave"
-                style="@style/Widget.Material3.Button.TextButton"
-                android:layout_width="0dp"
+                style="@style/Widget.App.ToolButton"
                 android:layout_height="64dp"
+                android:layout_width="0dp"
                 android:layout_weight="1"
                 android:text="Save"
                 android:textSize="12sp"

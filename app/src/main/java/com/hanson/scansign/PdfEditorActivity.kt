@@ -11,6 +11,8 @@ import android.text.InputType
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -61,7 +63,9 @@ class PdfEditorActivity : AppCompatActivity(), PdfDocView.Listener {
     private lateinit var loading: View
     private lateinit var loadingText: TextView
     private lateinit var zoomBox: View
-    private lateinit var toolForm: MaterialButton
+    private lateinit var fieldEditor: EditText
+    /** Field being typed into in place. */
+    private var editingWidget: FormWidget? = null
 
     private lateinit var source: File
     private var displayName = "document.pdf"
@@ -91,7 +95,12 @@ class PdfEditorActivity : AppCompatActivity(), PdfDocView.Listener {
         loading = findViewById(R.id.loading)
         loadingText = findViewById(R.id.loadingText)
         zoomBox = findViewById(R.id.zoomBox)
-        toolForm = findViewById(R.id.toolForm)
+        fieldEditor = findViewById(R.id.fieldEditor)
+        fieldEditor.setOnEditorActionListener { _, action, _ ->
+            if (action == EditorInfo.IME_ACTION_NEXT) { nextField(); true }
+            else if (action == EditorInfo.IME_ACTION_DONE) { commitEdit(); true }
+            else false
+        }
 
         val path = intent.getStringExtra(EXTRA_PDF)
         if (path == null) { finish(); return }
@@ -112,7 +121,6 @@ class PdfEditorActivity : AppCompatActivity(), PdfDocView.Listener {
         findViewById<MaterialButton>(R.id.toolText).setOnClickListener { if (requireEditable()) textDialog(null) }
         findViewById<MaterialButton>(R.id.toolPage).setOnClickListener { goToPageDialog() }
         findViewById<MaterialButton>(R.id.toolSave).setOnClickListener { if (requireEditable()) saveDialog() }
-        toolForm.setOnClickListener { toggleFields() }
         pagePill.setOnClickListener { goToPageDialog() }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -168,7 +176,7 @@ class PdfEditorActivity : AppCompatActivity(), PdfDocView.Listener {
 
     private fun show(p: OpenedPdf) {
         val r = try {
-            PageRenderer(p.file)
+            PageRenderer(p.displayFile)
         } catch (e: Throwable) {
             setLoading(false, null)
             Toast.makeText(this, "Can't display this PDF", Toast.LENGTH_LONG).show()
@@ -178,6 +186,7 @@ class PdfEditorActivity : AppCompatActivity(), PdfDocView.Listener {
         pdf = p
         renderer = r
         doc.setDocument(p.geoms, r, p.widgets, items)
+        doc.drawAllValues = !p.valuesBaked && p.fields.isNotEmpty()
         setLoading(false, null)
         toolbar.subtitle = "${p.geoms.size} page${if (p.geoms.size == 1) "" else "s"}" +
             if (p.fields.isNotEmpty()) " · ${p.fields.size} form fields" else ""
@@ -186,9 +195,7 @@ class PdfEditorActivity : AppCompatActivity(), PdfDocView.Listener {
         pagePill.text = "1 / ${p.geoms.size}"
         if (p.fields.isNotEmpty()) {
             formBanner.visibility = View.VISIBLE
-            formBanner.postDelayed({ formBanner.visibility = View.GONE }, 6000)
-        } else {
-            toolForm.visibility = View.GONE
+            formBanner.postDelayed({ formBanner.visibility = View.GONE }, 5000)
         }
         if (!p.editable) {
             Toast.makeText(this, "This PDF can be viewed, but it can't be edited", Toast.LENGTH_LONG).show()
@@ -226,27 +233,93 @@ class PdfEditorActivity : AppCompatActivity(), PdfDocView.Listener {
 
     override fun onSelectionChanged(item: EditItem?) {}
 
+    override fun onViewportChanged() = positionEditor()
+
+    override fun onAnyTap() {
+        if (editingWidget != null) commitEdit()
+    }
+
+    // ---------------- in-place form typing ----------------
+
+    private fun startEdit(w: FormWidget) {
+        commitEdit()
+        editingWidget = w
+        val f = w.field
+        fieldEditor.setText(f.value)
+        fieldEditor.inputType = if (f.multiline)
+            InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        else InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        fieldEditor.imeOptions = if (nextTextWidget(w) != null) EditorInfo.IME_ACTION_NEXT else EditorInfo.IME_ACTION_DONE
+        fieldEditor.isSingleLine = !f.multiline
+        doc.editingField = f
+        fieldEditor.visibility = View.VISIBLE
+        // make small fields big enough to type into comfortably
+        val minH = 40 * resources.displayMetrics.density
+        doc.widgetScreenRect(w)?.let { doc.zoomToFit(it, if (f.multiline) minH * 0.8f else minH) }
+        doc.widgetScreenRect(w)?.let { doc.ensureVisible(it) }
+        positionEditor()
+        fieldEditor.requestFocus()
+        fieldEditor.setSelection(fieldEditor.text.length)
+        fieldEditor.post {
+            (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
+                .showSoftInput(fieldEditor, InputMethodManager.SHOW_IMPLICIT)
+            fieldEditor.postDelayed({ doc.widgetScreenRect(w)?.let { doc.ensureVisible(it) } }, 350)
+        }
+    }
+
+    private fun positionEditor() {
+        val w = editingWidget ?: return
+        val r = doc.widgetScreenRect(w) ?: return
+        val minH = 36 * resources.displayMetrics.density
+        val h = if (w.field.multiline) r.height().coerceAtLeast(minH) else r.height().coerceAtLeast(minH)
+        val lp = fieldEditor.layoutParams as FrameLayout.LayoutParams
+        lp.width = r.width().toInt().coerceAtLeast((60 * resources.displayMetrics.density).toInt())
+        lp.height = h.toInt()
+        lp.leftMargin = r.left.toInt()
+        lp.topMargin = (r.top - (h - r.height()) / 2).toInt()
+        lp.gravity = android.view.Gravity.TOP or android.view.Gravity.START
+        fieldEditor.layoutParams = lp
+        fieldEditor.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, (h * 0.55f).coerceIn(28f, 120f))
+    }
+
+    private fun commitEdit() {
+        val w = editingWidget ?: return
+        editingWidget = null
+        val value = fieldEditor.text.toString()
+        if (value != w.field.value) {
+            w.field.value = value
+            dirty = true
+        }
+        doc.editingField = null
+        fieldEditor.visibility = View.GONE
+        (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
+            .hideSoftInputFromWindow(fieldEditor.windowToken, 0)
+        doc.refresh()
+    }
+
+    /** Next text field in reading order (same page top-to-bottom, then following pages). */
+    private fun nextTextWidget(w: FormWidget): FormWidget? {
+        val list = pdf?.widgets?.filter { it.field.type == FieldType.TEXT && !it.field.readOnly } ?: return null
+        val sorted = list.sortedWith(compareBy<FormWidget>({ it.page }, { (it.rect.top * 50).toInt() }, { it.rect.left }))
+        val i = sorted.indexOf(w)
+        return if (i >= 0 && i + 1 < sorted.size) sorted[i + 1] else null
+    }
+
+    private fun nextField() {
+        val cur = editingWidget ?: return
+        val next = nextTextWidget(cur)
+        commitEdit()
+        if (next != null) {
+            if (next.page != doc.currentPage()) doc.goToPage(next.page)
+            startEdit(next)
+        }
+    }
+
     override fun onFieldTapped(widget: FormWidget) {
         if (!requireEditable()) return
         val f = widget.field
         when (f.type) {
-            FieldType.TEXT -> {
-                val input = EditText(this).apply {
-                    setText(f.value)
-                    setSelection(text.length)
-                    inputType = if (f.multiline)
-                        InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-                    else InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-                }
-                MaterialAlertDialogBuilder(this)
-                    .setTitle(f.label.ifBlank { "Fill in" })
-                    .setView(padded(input))
-                    .setPositiveButton("OK") { _, _ -> setField(f, input.text.toString()) }
-                    .setNeutralButton("Clear") { _, _ -> setField(f, "") }
-                    .setNegativeButton("Cancel", null)
-                    .show()
-                input.requestFocus()
-            }
+            FieldType.TEXT -> startEdit(widget)
             FieldType.CHECKBOX -> {
                 val checked = f.value != "Off" && f.value.isNotEmpty()
                 setField(f, if (checked) "Off" else (widget.onValue ?: "Yes"))
@@ -277,13 +350,6 @@ class PdfEditorActivity : AppCompatActivity(), PdfDocView.Listener {
         f.value = value
         dirty = true
         doc.refresh()
-    }
-
-    private fun toggleFields() {
-        doc.showFields = !doc.showFields
-        Toast.makeText(
-            this, if (doc.showFields) "Form fields highlighted" else "Field highlight hidden", Toast.LENGTH_SHORT
-        ).show()
     }
 
     // ---------------- adding items ----------------
@@ -461,6 +527,7 @@ class PdfEditorActivity : AppCompatActivity(), PdfDocView.Listener {
     }
 
     private fun confirmLeave() {
+        if (editingWidget != null) { commitEdit(); return }
         if (!dirty) { finish(); return }
         MaterialAlertDialogBuilder(this)
             .setTitle("Save changes?")
@@ -474,6 +541,7 @@ class PdfEditorActivity : AppCompatActivity(), PdfDocView.Listener {
     // ---------------- saving ----------------
 
     private fun saveDialog() {
+        commitEdit()
         val p = pdf ?: return
         if (!dirty) {
             Toast.makeText(this, "Nothing changed yet", Toast.LENGTH_SHORT).show()

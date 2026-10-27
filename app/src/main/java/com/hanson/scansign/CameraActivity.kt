@@ -35,6 +35,9 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 /**
  * In-app camera. Document mode shows the detected page outline live and can capture
@@ -199,45 +202,79 @@ class CameraActivity : AppCompatActivity() {
     // ---------------- live detection ----------------
 
     private fun analyze(img: ImageProxy) {
+        val mats = ArrayList<Mat>()
+        fun m(): Mat = Mat().also { mats.add(it) }
         try {
             if (!App.openCvReady || capturing) return
-            val plane = img.planes[0]
             val w = img.width
             val h = img.height
-            val rowStride = plane.rowStride
-            val buf = plane.buffer
-            val bytes = ByteArray(w * h)
-            if (rowStride == w) {
-                buf.get(bytes, 0, w * h)
-            } else {
-                for (y in 0 until h) {
-                    buf.position(y * rowStride)
-                    buf.get(bytes, y * w, w)
+            // luminance
+            val yp = img.planes[0]
+            val yBytes = ByteArray(w * h)
+            copyPlane(yp.buffer, yp.rowStride, yp.pixelStride, w, h, yBytes)
+            // chroma (saturation-like): distance of U,V from neutral grey, at half resolution
+            val cw = w / 2
+            val ch = h / 2
+            val uBytes = ByteArray(cw * ch)
+            val vBytes = ByteArray(cw * ch)
+            copyPlane(img.planes[1].buffer, img.planes[1].rowStride, img.planes[1].pixelStride, cw, ch, uBytes)
+            copyPlane(img.planes[2].buffer, img.planes[2].rowStride, img.planes[2].pixelStride, cw, ch, vBytes)
+            val chroma = ByteArray(cw * ch)
+            for (i in chroma.indices) {
+                val du = (uBytes[i].toInt() and 0xFF) - 128
+                val dv = (vBytes[i].toInt() and 0xFF) - 128
+                chroma[i] = (sqrt((du * du + dv * dv).toDouble()) * 2.2).toInt().coerceAtMost(255).toByte()
+            }
+            val gray = m().apply { create(h, w, CvType.CV_8UC1); put(0, 0, yBytes) }
+            val chromaHalf = m().apply { create(ch, cw, CvType.CV_8UC1); put(0, 0, chroma) }
+
+            val rot = img.imageInfo.rotationDegrees
+            fun rotate(src: Mat): Mat {
+                val dst = m()
+                when (rot) {
+                    90 -> Core.rotate(src, dst, Core.ROTATE_90_CLOCKWISE)
+                    180 -> Core.rotate(src, dst, Core.ROTATE_180)
+                    270 -> Core.rotate(src, dst, Core.ROTATE_90_COUNTERCLOCKWISE)
+                    else -> src.copyTo(dst)
                 }
+                return dst
             }
-            val gray = Mat(h, w, CvType.CV_8UC1)
-            gray.put(0, 0, bytes)
-            val rotated = Mat()
-            when (img.imageInfo.rotationDegrees) {
-                90 -> Core.rotate(gray, rotated, Core.ROTATE_90_CLOCKWISE)
-                180 -> Core.rotate(gray, rotated, Core.ROTATE_180)
-                270 -> Core.rotate(gray, rotated, Core.ROTATE_90_COUNTERCLOCKWISE)
-                else -> gray.copyTo(rotated)
-            }
-            gray.release()
-            val s = 480.0 / max(rotated.cols(), rotated.rows())
-            val small = Mat()
-            Imgproc.resize(rotated, small, Size(rotated.cols() * s, rotated.rows() * s), 0.0, 0.0, Imgproc.INTER_AREA)
-            val aspect = rotated.cols().toFloat() / rotated.rows()
-            rotated.release()
-            val found = Scanner.detectGray(small)
+            val rg = rotate(gray)
+            val rc = rotate(chromaHalf)
+            val s = 480.0 / max(rg.cols(), rg.rows())
+            val size = Size((rg.cols() * s).roundToInt().toDouble(), (rg.rows() * s).roundToInt().toDouble())
+            val small = m(); Imgproc.resize(rg, small, size, 0.0, 0.0, Imgproc.INTER_AREA)
+            val smallSat = m(); Imgproc.resize(rc, smallSat, size, 0.0, 0.0, Imgproc.INTER_LINEAR)
+            val aspect = rg.cols().toFloat() / rg.rows()
+            val q = Detector.detect(small, smallSat, perGroup = 8)
             val fw = small.cols().toFloat()
             val fh = small.rows().toFloat()
-            small.release()
-            onDetection(found?.map { PointF(it.x / fw, it.y / fh) }, aspect)
+            val found = q?.let { d -> List(4) { PointF(d[it * 2].toFloat() / fw, d[it * 2 + 1].toFloat() / fh) } }
+            onDetection(found, aspect)
         } catch (_: Throwable) {
         } finally {
+            mats.forEach { it.release() }
             img.close()
+        }
+    }
+
+    private fun copyPlane(buf: java.nio.ByteBuffer, rowStride: Int, pixelStride: Int, w: Int, h: Int, out: ByteArray) {
+        buf.rewind()
+        if (pixelStride == 1 && rowStride == w) {
+            buf.get(out, 0, min(out.size, buf.remaining()))
+            return
+        }
+        val row = ByteArray(rowStride)
+        for (y in 0 until h) {
+            val start = y * rowStride
+            if (start >= buf.limit()) break
+            buf.position(start)
+            val len = min(rowStride, buf.remaining())
+            buf.get(row, 0, len)
+            for (x in 0 until w) {
+                val idx = x * pixelStride
+                out[y * w + x] = if (idx < len) row[idx] else 0
+            }
         }
     }
 

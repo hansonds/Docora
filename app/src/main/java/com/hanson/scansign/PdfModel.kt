@@ -9,6 +9,10 @@ import com.tom_roush.pdfbox.cos.COSDictionary
 import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.encryption.InvalidPasswordException
+import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotation
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationPopup
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationWidget
 import com.tom_roush.pdfbox.pdmodel.interactive.form.PDCheckBox
 import com.tom_roush.pdfbox.pdmodel.interactive.form.PDChoice
@@ -103,8 +107,12 @@ class FormField(
 class FormWidget(val field: FormField, val page: Int, val rect: RectF, val onValue: String?)
 
 class OpenedPdf(
-    /** File that PdfRenderer can display and PDFBox can edit (decrypted / repaired copy if needed). */
+    /** File that PDFBox edits and saves from (decrypted / repaired copy if needed). */
     val file: File,
+    /** File shown on screen: same as [file], or a copy with form values and annotations drawn into the pages. */
+    val displayFile: File,
+    /** True when existing form values are already visible in [displayFile]. */
+    val valuesBaked: Boolean,
     val geoms: List<PageGeom>,
     val fields: List<FormField>,
     val widgets: List<FormWidget>,
@@ -129,6 +137,8 @@ object PdfOpener {
         var fields: List<FormField> = emptyList()
         var widgets: List<FormWidget> = emptyList()
         var editable = true
+        var displayFile: File? = null
+        var valuesBaked = false
 
         try {
             PDDocument.load(src, password ?: "", memory()).use { doc ->
@@ -143,6 +153,18 @@ object PdfOpener {
                 val (f, w) = readForm(doc)
                 fields = f
                 widgets = w
+                // Android's renderer doesn't draw form values or annotations: bake them into a display copy
+                if (fields.isNotEmpty() || hasVisibleAnnotations(doc)) {
+                    try {
+                        valuesBaked = bake(doc)
+                        val disp = Storage.newWorkFile(ctx, "pdf")
+                        doc.save(disp)
+                        displayFile = disp
+                    } catch (e: Throwable) {
+                        displayFile = null
+                        valuesBaked = false
+                    }
+                }
             }
         } catch (e: InvalidPasswordException) {
             return if (password == null) OpenResult.NeedPassword else OpenResult.WrongPassword
@@ -169,7 +191,76 @@ object PdfOpener {
 
         val g = geoms ?: rendererGeoms(renderFile) ?: return OpenResult.Error("This PDF has no pages.")
         if (g.isEmpty()) return OpenResult.Error("This PDF has no pages.")
-        return OpenResult.Ok(OpenedPdf(renderFile, g, fields, widgets, editable))
+        var disp = displayFile ?: renderFile
+        if (disp != renderFile && !canRender(disp)) { disp = renderFile; valuesBaked = false }
+        return OpenResult.Ok(OpenedPdf(renderFile, disp, valuesBaked, g, fields, widgets, editable))
+    }
+
+    private fun skipAnnot(a: PDAnnotation): Boolean =
+        a is PDAnnotationWidget || a is PDAnnotationLink || a is PDAnnotationPopup || a.isHidden || a.isNoView
+
+    private fun hasVisibleAnnotations(doc: PDDocument): Boolean {
+        for (page in doc.pages) {
+            val annots = try { page.annotations } catch (e: Throwable) { continue }
+            if (annots.any { !skipAnnot(it) && it.normalAppearanceStream != null }) return true
+        }
+        return false
+    }
+
+    /**
+     * Draws form fields (with their current values) and other annotations into the page content.
+     * Only used for the on-screen copy. Returns true if form values were baked in.
+     */
+    private fun bake(doc: PDDocument): Boolean {
+        var formOk = false
+        val form = doc.documentCatalog.acroForm
+        if (form != null) {
+            try { form.refreshAppearances() } catch (_: Throwable) {}
+            formOk = try {
+                form.flatten(form.fieldTree.toList(), true)
+                true
+            } catch (e: Throwable) {
+                false
+            }
+        }
+        for (page in doc.pages) {
+            val annots = try { page.annotations } catch (e: Throwable) { continue }
+            val draw = annots.filter { !skipAnnot(it) && it.normalAppearanceStream != null }
+            if (draw.isEmpty()) continue
+            try {
+                PDPageContentStream(doc, page, PDPageContentStream.AppendMode.APPEND, true, true).use { cs ->
+                    for (a in draw) drawAppearance(cs, a)
+                }
+            } catch (_: Throwable) {}
+        }
+        return formOk
+    }
+
+    /** Places an annotation's appearance stream into its rectangle (same maths viewers use). */
+    private fun drawAppearance(cs: PDPageContentStream, a: PDAnnotation) {
+        val ap = a.normalAppearanceStream ?: return
+        val rect = a.rectangle ?: return
+        val bbox = ap.bBox ?: return
+        val m = ap.matrix
+        val xs = FloatArray(4)
+        val ys = FloatArray(4)
+        val corners = arrayOf(
+            floatArrayOf(bbox.lowerLeftX, bbox.lowerLeftY), floatArrayOf(bbox.upperRightX, bbox.lowerLeftY),
+            floatArrayOf(bbox.upperRightX, bbox.upperRightY), floatArrayOf(bbox.lowerLeftX, bbox.upperRightY)
+        )
+        for (i in 0..3) {
+            val p = m.transformPoint(corners[i][0], corners[i][1])
+            xs[i] = p.x; ys[i] = p.y
+        }
+        val bx = xs.min(); val by = ys.min()
+        val bw = xs.max() - bx; val bh = ys.max() - by
+        if (bw <= 0f || bh <= 0f) return
+        val sx = rect.width / bw
+        val sy = rect.height / bh
+        cs.saveGraphicsState()
+        cs.transform(com.tom_roush.pdfbox.util.Matrix(sx, 0f, 0f, sy, rect.lowerLeftX - bx * sx, rect.lowerLeftY - by * sy))
+        cs.drawForm(ap)
+        cs.restoreGraphicsState()
     }
 
     private fun canRender(f: File): Boolean = try {

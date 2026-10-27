@@ -51,8 +51,9 @@
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnScan"
-                    android:layout_width="wrap_content"
+                    style="@style/Widget.App.PrimaryButton"
                     android:layout_height="52dp"
+                    android:layout_width="wrap_content"
                     android:layout_marginTop="16dp"
                     android:backgroundTint="#FFFFFF"
                     android:paddingHorizontal="22dp"
@@ -111,9 +112,9 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnResume"
-                style="@style/Widget.Material3.Button.TonalButton"
-                android:layout_width="match_parent"
+                style="@style/Widget.App.SecondaryButton"
                 android:layout_height="52dp"
+                android:layout_width="match_parent"
                 android:layout_marginTop="12dp"
                 android:visibility="gone" />
 

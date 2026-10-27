@@ -50,120 +50,25 @@ object Scanner {
         val ratio = if (scale < 1.0) 1.0 / scale else 1.0
         val rgba = Mat()
         val gray = Mat()
+        val rgb = Mat()
+        val hsv = Mat()
+        val sat = Mat()
         try {
             Utils.bitmapToMat(small, rgba)
             Imgproc.cvtColor(rgba, gray, Imgproc.COLOR_RGBA2GRAY)
-            val found = detectGray(gray) ?: return null
+            Imgproc.cvtColor(rgba, rgb, Imgproc.COLOR_RGBA2RGB)
+            Imgproc.cvtColor(rgb, hsv, Imgproc.COLOR_RGB2HSV)
+            Core.extractChannel(hsv, sat, 1)
+            val q = Detector.detect(gray, sat) ?: return null
+            val found = List(4) { PointF(q[it * 2].toFloat(), q[it * 2 + 1].toFloat()) }
             return orderPoints(found.map { PointF((it.x * ratio).toFloat(), (it.y * ratio).toFloat()) })
                 .map { PointF(it.x.coerceIn(0f, bmp.width.toFloat()), it.y.coerceIn(0f, bmp.height.toFloat())) }
         } catch (e: Throwable) {
             return null
         } finally {
-            rgba.release(); gray.release()
+            rgba.release(); gray.release(); rgb.release(); hsv.release(); sat.release()
             if (small != bmp) small.recycle()
         }
-    }
-
-    /**
-     * Core detector on a grayscale image (ideally 400-800 px on the long side).
-     * Returns corners in [gray] pixel coordinates, ordered TL, TR, BR, BL.
-     */
-    fun detectGray(gray: Mat): List<PointF>? {
-        if (!App.openCvReady) return null
-        val imgArea = gray.rows().toDouble() * gray.cols()
-        val edgeMaps = ArrayList<Mat>()
-        try {
-            // 1) soft Canny
-            val b1 = Mat()
-            Imgproc.GaussianBlur(gray, b1, Size(5.0, 5.0), 0.0)
-            val e1 = Mat()
-            Imgproc.Canny(b1, e1, 30.0, 100.0)
-            Imgproc.dilate(e1, e1, Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(3.0, 3.0)))
-            edgeMaps.add(e1)
-
-            // 2) strong blur + hard Canny (ignores text inside the page)
-            val b2 = Mat()
-            Imgproc.medianBlur(gray, b2, 9)
-            val e2 = Mat()
-            Imgproc.Canny(b2, e2, 60.0, 180.0)
-            Imgproc.morphologyEx(
-                e2, e2, Imgproc.MORPH_CLOSE,
-                Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(7.0, 7.0))
-            )
-            edgeMaps.add(e2)
-
-            // 3) brightness threshold (white paper on a darker table) - fallback only
-            val b3 = Mat()
-            Imgproc.GaussianBlur(gray, b3, Size(7.0, 7.0), 0.0)
-            val t3 = Mat()
-            Imgproc.threshold(b3, t3, 0.0, 255.0, Imgproc.THRESH_BINARY + Imgproc.THRESH_OTSU)
-            Imgproc.morphologyEx(
-                t3, t3, Imgproc.MORPH_CLOSE,
-                Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(9.0, 9.0))
-            )
-            edgeMaps.add(t3)
-            b1.release(); b2.release(); b3.release()
-
-            var best: Array<Point>? = null
-            var bestArea = 0.0
-            for (edges in edgeMaps.take(2)) {
-                val quad = largestQuad(edges, imgArea) ?: continue
-                val area = abs(Imgproc.contourArea(MatOfPoint(*quad)))
-                // a quad that is basically the whole frame is a weak signal; prefer real pages
-                val penalty = if (area > imgArea * 0.97) 0.5 else 1.0
-                if (area * penalty > bestArea) {
-                    bestArea = area * penalty
-                    best = quad
-                }
-            }
-            if (best == null) best = largestQuad(edgeMaps[2], imgArea)
-            val found = best ?: return null
-            return orderPoints(found.map { PointF(it.x.toFloat(), it.y.toFloat()) })
-        } catch (e: Throwable) {
-            return null
-        } finally {
-            edgeMaps.forEach { it.release() }
-        }
-    }
-
-    private fun largestQuad(edges: Mat, imgArea: Double): Array<Point>? {
-        val contours = ArrayList<MatOfPoint>()
-        val hierarchy = Mat()
-        Imgproc.findContours(edges.clone(), contours, hierarchy, Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE)
-        hierarchy.release()
-        val sorted = contours.sortedByDescending { Imgproc.contourArea(it) }.take(8)
-        for (c in sorted) {
-            if (Imgproc.contourArea(c) < imgArea * 0.12) break
-            val c2f = MatOfPoint2f(*c.toArray())
-            val peri = Imgproc.arcLength(c2f, true)
-            val approx = MatOfPoint2f()
-            Imgproc.approxPolyDP(c2f, approx, 0.02 * peri, true)
-            if (approx.total() == 4L && Imgproc.isContourConvex(MatOfPoint(*approx.toArray()))) {
-                return approx.toArray()
-            }
-            // fall back to the convex hull, simplified progressively until it has 4 corners
-            val hullIdx = MatOfInt()
-            Imgproc.convexHull(c, hullIdx)
-            val pts = c.toArray()
-            val hullPts = hullIdx.toArray().map { pts[it] }.toTypedArray()
-            if (hullPts.size >= 4) {
-                val hull2f = MatOfPoint2f(*hullPts)
-                val hp = Imgproc.arcLength(hull2f, true)
-                var eps = 0.02
-                while (eps <= 0.1) {
-                    val a2 = MatOfPoint2f()
-                    Imgproc.approxPolyDP(hull2f, a2, eps * hp, true)
-                    if (a2.total() == 4L) {
-                        val area = abs(Imgproc.contourArea(MatOfPoint(*a2.toArray())))
-                        if (area > imgArea * 0.12) return a2.toArray()
-                        break
-                    }
-                    if (a2.total() < 4L) break
-                    eps += 0.01
-                }
-            }
-        }
-        return null
     }
 
     /** Orders 4 points as top-left, top-right, bottom-right, bottom-left. */

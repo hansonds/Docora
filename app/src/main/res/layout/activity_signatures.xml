@@ -55,26 +55,28 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:gravity="center_vertical"
         android:orientation="horizontal"
         android:padding="12dp">
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnCamera"
+            style="@style/Widget.App.PrimaryButton"
+            android:layout_height="52dp"
             android:layout_width="0dp"
-            android:layout_height="56dp"
             android:layout_marginEnd="6dp"
             android:layout_weight="1"
-            android:text="Photo of signature"
+            android:text="Camera"
             app:icon="@drawable/ic_camera" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnGallery"
-            style="@style/Widget.Material3.Button.TonalButton"
+            style="@style/Widget.App.SecondaryButton"
+            android:layout_height="52dp"
             android:layout_width="0dp"
-            android:layout_height="56dp"
             android:layout_marginStart="6dp"
             android:layout_weight="1"
-            android:text="From gallery"
+            android:text="Gallery"
             app:icon="@drawable/ic_photo" />
     </LinearLayout>
 </LinearLayout>
