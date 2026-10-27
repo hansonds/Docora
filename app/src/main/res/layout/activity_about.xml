@@ -31,7 +31,7 @@
                 android:layout_height="96dp"
                 android:layout_marginTop="8dp"
                 android:contentDescription="@null"
-                android:src="@mipmap/ic_launcher" />
+                android:src="@drawable/app_logo" />
 
             <TextView
                 android:layout_width="wrap_content"

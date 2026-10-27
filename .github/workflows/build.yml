@@ -21,20 +21,21 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: '8.11.1'
 
-      - name: Build release APK
-        run: gradle assembleRelease --no-daemon --stacktrace
+      - name: Build release APK and Play Store bundle
+        run: gradle assembleRelease bundleRelease --no-daemon --stacktrace
 
       - name: Rename APK
         run: |
           mkdir -p out
           cp app/build/outputs/apk/release/*.apk out/Docora.apk
+          cp app/build/outputs/bundle/release/*.aab out/Docora-playstore.aab
 
       - uses: actions/upload-artifact@v4
         with:
           name: Docora
-          path: out/*.apk
+          path: out/*
 
       - name: Publish to Releases
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
@@ -43,4 +44,6 @@ jobs:
           tag_name: build-${{ github.run_number }}
           name: Docora build ${{ github.run_number }}
           make_latest: true
-          files: out/*.apk
+          files: |
+            out/Docora.apk
+            out/Docora-playstore.aab
