@@ -197,9 +197,21 @@ class ScanActivity : BaseActivity() {
         if (uris.isEmpty()) return@registerForActivityResult
         progress.visibility = View.VISIBLE
         lifecycleScope.launch {
-            val files = withContext(Dispatchers.IO) { uris.mapNotNull { Storage.copyUriToWork(this@ScanActivity, it, "jpg") } }
+            val filter = Settings.defaultFilter(this@ScanActivity)
+            val pages = withContext(Dispatchers.IO) {
+                uris.mapNotNull { u ->
+                    val orig = Storage.copyUriToWork(this@ScanActivity, u, "jpg") ?: return@mapNotNull null
+                    if (filter == ScanFilter.ORIGINAL) return@mapNotNull ScanPage(orig, orig)
+                    val bmp = ImageUtils.load(orig) ?: return@mapNotNull ScanPage(orig, orig)
+                    val out = Storage.newWorkFile(this@ScanActivity, "jpg")
+                    val f = Scanner.applyFilter(bmp, filter)
+                    ImageUtils.saveJpeg(f, out, 92)
+                    f.recycle(); bmp.recycle()
+                    ScanPage(orig, out)
+                }
+            }
             progress.visibility = View.GONE
-            for (f in files) ScanSession.pages.add(ScanPage(f, f))
+            ScanSession.pages.addAll(pages)
             adapter.notifyDataSetChanged()
             list.scrollToPosition(ScanSession.pages.size - 1)
             refreshEmpty()

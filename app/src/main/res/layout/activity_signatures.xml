@@ -18,7 +18,7 @@
         android:layout_height="wrap_content"
         android:paddingHorizontal="16dp"
         android:paddingTop="12dp"
-        android:text="Photograph a signature on white paper (the paper is removed automatically) or draw one with your finger."
+        android:text="Photograph a signature on white paper (the paper is removed automatically) or draw one with your finger. Tap a signature to share or save it as a transparent PNG."
         android:textColor="?attr/colorOnSurfaceVariant"
         android:textSize="13sp" />
 
