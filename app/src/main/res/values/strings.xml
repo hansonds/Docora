@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">PDF ScanSign</string>
+    <string name="app_name">Docora</string>
+    <string name="app_full_name">Docora — PDF Editor &amp; Scanner</string>
     <string name="sc_scan">Scan</string>
     <string name="sc_scan_long">Scan a document</string>
     <string name="sc_open">Open PDF</string>

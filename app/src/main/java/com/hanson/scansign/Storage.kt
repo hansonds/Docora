@@ -71,14 +71,14 @@ object Storage {
         ctx.startActivity(Intent.createChooser(i, "Open with"))
     }
 
-    /** Copies the PDF into Downloads/ScanSign so it shows up in the Files app. */
+    /** Copies the PDF into Downloads/Docora so it shows up in the Files app. */
     fun exportToDownloads(ctx: Context, file: File): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
         return try {
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, file.name)
                 put(MediaStore.Downloads.MIME_TYPE, "application/pdf")
-                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/PDF ScanSign")
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Docora")
             }
             val uri = ctx.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
                 ?: return false

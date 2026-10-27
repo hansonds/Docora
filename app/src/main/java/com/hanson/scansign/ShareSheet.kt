@@ -38,16 +38,32 @@ object ShareSheet {
         lateinit var spinner: ProgressBar
     }
 
-    fun show(a: AppCompatActivity, file: File) {
+    fun show(a: AppCompatActivity, file: File) = sizeSheet(a, file, file.name, "Share PDF", forCompress = false) { f ->
+        Storage.sharePdf(a, f)
+    }
+
+    /**
+     * Compress picker: shows Light / Medium / Strong with real sizes, then hands the chosen
+     * compressed file to [onPick]. [displayName] is shown under the title.
+     */
+    fun compress(a: AppCompatActivity, file: File, displayName: String, onPick: (File) -> Unit) =
+        sizeSheet(a, file, displayName, "Compress PDF", forCompress = true, onPick = onPick)
+
+    private fun sizeSheet(a: AppCompatActivity, file: File, displayName: String, title: String, forCompress: Boolean, onPick: (File) -> Unit) {
         val sheet = BottomSheetDialog(a)
         val view = LayoutInflater.from(a).inflate(R.layout.sheet_share, null)
         sheet.setContentView(view)
         sheet.behavior.state = BottomSheetBehavior.STATE_EXPANDED
         sheet.behavior.skipCollapsed = true
-        view.findViewById<TextView>(R.id.fileName).text = file.name
+        view.findViewById<TextView>(R.id.fileName).text = displayName
+        view.findViewById<TextView>(R.id.sheetTitle).text = title
 
         val original = file.length()
-        val opts = listOf(
+        val opts = if (forCompress) listOf(
+            Option("Light", "Best quality · a little smaller", R.drawable.ic_compress, CompressLevel.LIGHT, false),
+            Option("Balanced", "Great quality · much smaller", R.drawable.ic_compress, CompressLevel.MEDIUM, true),
+            Option("Smallest", "Smallest file · lower image quality", R.drawable.ic_compress, CompressLevel.STRONG, false)
+        ) else listOf(
             Option("Original", "Best quality, unchanged", R.drawable.ic_file, null, false),
             Option("Compressed", "Great quality · WhatsApp & email", R.drawable.ic_compress, CompressLevel.MEDIUM, true),
             Option("Smallest", "Smallest file · fast to send", R.drawable.ic_compress, CompressLevel.STRONG, false)
@@ -67,11 +83,14 @@ object ShareSheet {
                 o.card.strokeColor = if (sel) primary else outline.outline
                 o.card.setCardBackgroundColor(if (sel) outline.selected else outline.surface)
             }
+            val unchanged = chosen.file == file
             shareBtn.text = when {
                 !chosen.ready -> "Preparing…"
+                forCompress && unchanged -> "Can't make it smaller"
+                forCompress -> "Continue  ·  ${fmt(chosen.file?.length() ?: original)}"
                 else -> "Share  ·  ${fmt(chosen.file?.length() ?: original)}"
             }
-            shareBtn.isEnabled = chosen.ready
+            shareBtn.isEnabled = chosen.ready && !(forCompress && unchanged)
         }
 
         for (o in opts) {
@@ -87,7 +106,8 @@ object ShareSheet {
             row.findViewById<ImageView>(R.id.icon).apply {
                 setImageResource(o.icon)
                 imageTintList = ColorStateList.valueOf(primary)
-                if (o.level == CompressLevel.STRONG) { scaleX = 0.8f; scaleY = 0.8f }
+                val sc = when (o.level) { CompressLevel.MEDIUM -> 0.88f; CompressLevel.STRONG -> 0.76f; else -> 1f }
+                scaleX = sc; scaleY = sc
             }
             if (o.level == null) {
                 o.file = file; o.ready = true
@@ -108,7 +128,8 @@ object ShareSheet {
         job = a.lifecycleScope.launch {
             val dir = File(a.cacheDir, "share").apply { mkdirs() }
             for (o in opts.filter { it.level != null }) {
-                val out = File(dir, "${o.level!!.name.lowercase()}_${file.name}")
+                val out = File(dir, if (forCompress) "c_${o.level!!.name.lowercase()}_${System.nanoTime()}.pdf"
+                    else "${o.level!!.name.lowercase()}_${file.name}")
                 val ok = withContext(Dispatchers.IO) {
                     try { PdfTools.compress(file, out, o.level, null) } catch (e: Throwable) { false }
                 }
@@ -134,7 +155,7 @@ object ShareSheet {
         shareBtn.setOnClickListener {
             val f = chosen.file ?: return@setOnClickListener
             sheet.dismiss()
-            Storage.sharePdf(a, f)
+            onPick(f)
         }
         sheet.show()
     }

@@ -397,7 +397,7 @@ class ScanActivity : BaseActivity() {
             MaterialAlertDialogBuilder(this@ScanActivity)
                 .setTitle("PDF saved")
                 .setMessage(
-                    file.name + if (exported) "\n\nA copy is in Downloads › PDF ScanSign." else ""
+                    file.name + if (exported) "\n\nA copy is in Downloads › Docora." else ""
                 )
                 .setPositiveButton("Open & sign") { _, _ ->
                     startActivity(PdfEditorActivity.intent(this@ScanActivity, file))

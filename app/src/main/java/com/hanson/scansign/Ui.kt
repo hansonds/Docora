@@ -71,7 +71,7 @@ object Ui {
         val sizeTxt = android.text.format.Formatter.formatShortFileSize(a, file.length())
         MaterialAlertDialogBuilder(a)
             .setTitle("Saved")
-            .setMessage("${file.name}  ·  $sizeTxt" + extra + if (exported) "\n\nA copy is in Downloads › PDF ScanSign." else "")
+            .setMessage("${file.name}  ·  $sizeTxt" + extra + if (exported) "\n\nA copy is in Downloads › Docora." else "")
             .setPositiveButton("Open") { _, _ -> a.startActivity(PdfEditorActivity.intent(a, file)) }
             .setNeutralButton("Share") { _, _ -> share(a, file) }
             .setNegativeButton("Close", null)

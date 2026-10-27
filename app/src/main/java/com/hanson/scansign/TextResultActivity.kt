@@ -134,7 +134,7 @@ class TextResultActivity : BaseActivity() {
                         val values = ContentValues().apply {
                             put(MediaStore.Downloads.DISPLAY_NAME, "$name.txt")
                             put(MediaStore.Downloads.MIME_TYPE, "text/plain")
-                            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/PDF ScanSign")
+                            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Docora")
                         }
                         val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return@withContext false
                         contentResolver.openOutputStream(uri)?.use { it.write(content.toByteArray()) }
@@ -142,7 +142,7 @@ class TextResultActivity : BaseActivity() {
                     } else false
                 } catch (e: Throwable) { false }
             }
-            Ui.toast(this@TextResultActivity, if (ok) "Saved to Downloads › PDF ScanSign › $name.txt" else "Could not save the file")
+            Ui.toast(this@TextResultActivity, if (ok) "Saved to Downloads › Docora › $name.txt" else "Could not save the file")
         }
     }
 }

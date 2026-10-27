@@ -1,6 +1,6 @@
-# PDF ScanSign
+# Docora — PDF Editor & Scanner
 
-Android app to scan documents, sign PDFs and fill PDF forms. By Hanson · [phoenicx.org](https://phoenicx.org)
+Free Android app to scan documents, edit, sign and fill PDFs. By Hanson · [phoenicx.org](https://phoenicx.org)
 
 Everything is free: no ads, no watermark, no account, works offline.
 
@@ -26,11 +26,13 @@ Everything is free: no ads, no watermark, no account, works offline.
 
 **More**: Save / Save as (choose any folder), share with optional compression, print, night reading mode, finger-drawn signatures, launcher shortcuts (Scan / Open PDF / Tools), themes (light / dark / system, 7 colours, pure black), tablet layouts.
 
-**Library**: search, sort, share, print, rename. Saved PDFs also go to **Downloads › PDF ScanSign**.
+**Library**: search, sort, share, print, rename. Saved PDFs also go to **Downloads › Docora**.
+
+**Download:** [Docora.apk](https://github.com/hansonds/Docora/releases/latest/download/Docora.apk)
 
 ## Building (GitHub does it for you)
 
-1. Create a new **private** repository on GitHub (e.g. `hansonds/PDF-ScanSign`).
+1. Create a new **private** repository on GitHub (e.g. `hansonds/Docora`).
 2. Upload everything in this folder, including the hidden `.github` folder and `app/scansign.jks`.
 3. Open the **Actions** tab — the "Build APK" workflow runs automatically (about 5 minutes).
 4. When it finishes, the APK is in **Releases** (and under the run's Artifacts).
