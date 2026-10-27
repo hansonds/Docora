@@ -9,7 +9,7 @@
         <intent
             android:action="com.hanson.scansign.action.SCAN"
             android:targetClass="com.hanson.scansign.MainActivity"
-            android:targetPackage="com.hanson.scansign" />
+            android:targetPackage="com.hanson.docora" />
     </shortcut>
     <shortcut
         android:enabled="true"
@@ -20,7 +20,7 @@
         <intent
             android:action="com.hanson.scansign.action.OPEN"
             android:targetClass="com.hanson.scansign.MainActivity"
-            android:targetPackage="com.hanson.scansign" />
+            android:targetPackage="com.hanson.docora" />
     </shortcut>
     <shortcut
         android:enabled="true"
@@ -31,6 +31,6 @@
         <intent
             android:action="com.hanson.scansign.action.TOOLS"
             android:targetClass="com.hanson.scansign.MainActivity"
-            android:targetPackage="com.hanson.scansign" />
+            android:targetPackage="com.hanson.docora" />
     </shortcut>
 </shortcuts>
