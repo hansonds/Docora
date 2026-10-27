@@ -31,7 +31,7 @@ class CameraOverlayView @JvmOverloads constructor(
     private var progress = 0f
     private val density = resources.displayMetrics.density
 
-    private val fill = Paint().apply { color = Color.argb(60, 0, 224, 168) }
+    private val fill = Paint().apply { color = Color.argb(36, 0, 224, 168) }
     private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE; strokeWidth = 3f * density; color = Color.rgb(0, 224, 168)
         strokeJoin = Paint.Join.ROUND

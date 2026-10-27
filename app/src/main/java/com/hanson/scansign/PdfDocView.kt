@@ -44,6 +44,10 @@ class PdfDocView @JvmOverloads constructor(
         fun onFieldTapped(widget: FormWidget)
         fun onItemsChanged()
         fun onSelectionChanged(item: EditItem?)
+        /** Scroll or zoom changed (used to keep the in-place field editor attached). */
+        fun onViewportChanged() {}
+        /** Any tap on the document (before it is handled). */
+        fun onAnyTap() {}
     }
 
     var listener: Listener? = null
@@ -56,6 +60,12 @@ class PdfDocView @JvmOverloads constructor(
     var selected: EditItem? = null
         private set
     var showFields = true
+        set(v) { field = v; invalidate() }
+    /** Draw every field value ourselves (when the display copy couldn't bake them in). */
+    var drawAllValues = false
+        set(v) { field = v; invalidate() }
+    /** Field currently being typed into: drawn without its old value underneath. */
+    var editingField: FormField? = null
         set(v) { field = v; invalidate() }
 
     // ---- layout (document coordinates at zoom 1) ----
@@ -244,11 +254,35 @@ class PdfDocView @JvmOverloads constructor(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
+        if (w == oldw && oldw != 0) {
+            // only the height changed (keyboard opened/closed): keep position, layout is width-based
+            clampScroll()
+            onViewportChanged()
+            return
+        }
         val keepPage = currentPage
         relayout()
         if (keepPage > 0) goToPage(keepPage)
         baseCache.evictAll()
         tiles.clear()
+    }
+
+    /** Where a form field is on screen right now. */
+    fun widgetScreenRect(w: FormWidget): RectF? {
+        if (w.page !in geoms.indices || pageTop.isEmpty()) return null
+        return widgetRect(w, pageScreenRect(w.page))
+    }
+
+    /** Scrolls so that [r] (screen coordinates) is fully visible with a margin. */
+    fun ensureVisible(r: RectF) {
+        val margin = 24 * density
+        var dy = 0f
+        if (r.bottom > height - margin) dy = r.bottom - (height - margin)
+        if (r.top - dy < margin) dy = r.top - margin
+        var dx = 0f
+        if (r.right > width - margin) dx = r.right - (width - margin)
+        if (r.left - dx < margin) dx = r.left - margin
+        if (dx != 0f || dy != 0f) scrollTo(scrollXf + dx, scrollYf + dy)
     }
 
     private fun relayout() {
@@ -313,6 +347,7 @@ class PdfDocView @JvmOverloads constructor(
         handler.postDelayed(tileRunnable, 180)
         tileGen++
         invalidate()
+        listener?.onViewportChanged()
     }
 
     override fun computeScroll() {
@@ -453,7 +488,9 @@ class PdfDocView @JvmOverloads constructor(
         for (w in list) {
             val f = w.field
             val r = widgetRect(w, pr)
-            if (f.changed) {
+            if (f === editingField) {
+                canvas.drawRect(r, fieldCover)
+            } else if (f.changed || (drawAllValues && f.value.isNotEmpty() && f.value != "Off")) {
                 canvas.drawRect(r, fieldCover)
                 when (f.type) {
                     FieldType.TEXT, FieldType.CHOICE -> {
@@ -706,7 +743,15 @@ class PdfDocView @JvmOverloads constructor(
         invalidate()
     }
 
+    /** Zooms in (if needed) so a field shown at [r] becomes at least [minHeightPx] tall. */
+    fun zoomToFit(r: RectF, minHeightPx: Float) {
+        if (r.height() >= minHeightPx) return
+        val target = (zoom * minHeightPx / max(1f, r.height())).coerceAtMost(maxZoom)
+        zoomAround(target, r.centerX(), r.centerY())
+    }
+
     private fun handleTap(x: Float, y: Float) {
+        listener?.onAnyTap()
         // items first (topmost last in list)
         for (item in items.asReversed()) {
             val r = itemRect(item) ?: continue

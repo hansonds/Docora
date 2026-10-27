@@ -82,19 +82,20 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnCancel"
-            style="@style/Widget.Material3.Button.OutlinedButton"
+            style="@style/Widget.App.OutlineButton"
+            android:layout_height="52dp"
             android:layout_width="0dp"
-            android:layout_height="56dp"
             android:layout_marginEnd="8dp"
             android:layout_weight="1"
             android:text="Cancel" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnSave"
+            style="@style/Widget.App.PrimaryButton"
+            android:layout_height="52dp"
             android:layout_width="0dp"
-            android:layout_height="56dp"
             android:layout_marginStart="8dp"
             android:layout_weight="1"
-            android:text="Save signature" />
+            android:text="Save" />
     </LinearLayout>
 </LinearLayout>

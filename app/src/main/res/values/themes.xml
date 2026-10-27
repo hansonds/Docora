@@ -50,6 +50,53 @@
         <item name="android:textStyle">bold</item>
     </style>
 
+    <!-- icon above a short label, used in bottom tool bars -->
+    <style name="Widget.App.ToolButton" parent="Widget.Material3.Button.TextButton">
+        <item name="android:layout_height">64dp</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:paddingLeft">4dp</item>
+        <item name="android:paddingRight">4dp</item>
+        <item name="iconGravity">top</item>
+        <item name="iconPadding">2dp</item>
+    </style>
+
+    <!-- full-width style action buttons: one line, icon before text, consistent height -->
+    <style name="Widget.App.PrimaryButton" parent="Widget.Material3.Button">
+        <item name="android:layout_height">52dp</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:paddingLeft">12dp</item>
+        <item name="android:paddingRight">12dp</item>
+        <item name="iconGravity">textStart</item>
+        <item name="iconPadding">8dp</item>
+    </style>
+
+    <style name="Widget.App.SecondaryButton" parent="Widget.Material3.Button.TonalButton">
+        <item name="android:layout_height">52dp</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:paddingLeft">12dp</item>
+        <item name="android:paddingRight">12dp</item>
+        <item name="iconGravity">textStart</item>
+        <item name="iconPadding">8dp</item>
+    </style>
+
+    <style name="Widget.App.OutlineButton" parent="Widget.Material3.Button.OutlinedButton">
+        <item name="android:layout_height">52dp</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+    </style>
+
     <style name="TextAppearance.App.Section" parent="TextAppearance.Material3.TitleMedium">
         <item name="android:textStyle">bold</item>
     </style>
