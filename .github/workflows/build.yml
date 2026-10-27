@@ -29,7 +29,7 @@ jobs:
       - name: Rename APK
         run: |
           mkdir -p out
-          cp app/build/outputs/apk/release/*.apk out/PDF-ScanSign-v1.0-build${{ github.run_number }}.apk
+          cp app/build/outputs/apk/release/*.apk out/PDF-ScanSign-v2.0-build${{ github.run_number }}.apk
 
       - uses: actions/upload-artifact@v4
         with:
