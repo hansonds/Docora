@@ -15,8 +15,6 @@
         <item name="colorOnSurfaceVariant">@color/md_on_surface_variant</item>
         <item name="colorOutline">@color/md_outline</item>
         <item name="android:windowBackground">@color/md_background</item>
-        <item name="android:statusBarColor">?android:attr/colorBackground</item>
-        <item name="android:navigationBarColor">?android:attr/colorBackground</item>
         <item name="android:windowLightStatusBar">@bool/light_bars</item>
         <item name="materialCardViewStyle">@style/Widget.App.Card</item>
     </style>
@@ -25,13 +23,9 @@
         <item name="colorPrimary">#B4C5FF</item>
         <item name="colorSecondary">#5ADBC6</item>
         <item name="android:windowBackground">@color/surface_dark</item>
-        <item name="android:statusBarColor">@color/surface_dark</item>
-        <item name="android:navigationBarColor">@color/surface_dark</item>
     </style>
 
     <style name="Theme.ScanSign.Camera" parent="Theme.ScanSign.Dark">
-        <item name="android:statusBarColor">#000000</item>
-        <item name="android:navigationBarColor">#000000</item>
         <item name="android:windowBackground">#000000</item>
     </style>
 

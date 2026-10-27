@@ -47,7 +47,5 @@
         <item name="android:windowBackground">@android:color/black</item>
         <item name="colorSurface">#0B0B0D</item>
         <item name="colorSurfaceVariant">#1A1B1F</item>
-        <item name="android:statusBarColor">#000000</item>
-        <item name="android:navigationBarColor">#000000</item>
     </style>
 </resources>
