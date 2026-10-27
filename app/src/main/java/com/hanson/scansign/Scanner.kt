@@ -18,6 +18,7 @@ import kotlin.math.max
 import kotlin.math.roundToInt
 
 enum class ScanFilter(val label: String) {
+    AUTO("Auto"),
     ORIGINAL("Original"),
     MAGIC("Magic color"),
     GRAY("Grayscale"),
@@ -154,6 +155,23 @@ object Scanner {
                 Imgproc.cvtColor(bw, result, Imgproc.COLOR_GRAY2RGBA)
                 g.release(); flat.release(); bw.release()
             }
+            ScanFilter.AUTO -> {
+                // shadows removed + contrast, then colour kept only if the page really has colour
+                val magic = magicColor(rgba)
+                if (isColourful(rgba)) {
+                    Imgproc.cvtColor(magic, result, Imgproc.COLOR_RGB2RGBA)
+                } else {
+                    val g = Mat()
+                    Imgproc.cvtColor(magic, g, Imgproc.COLOR_RGB2GRAY)
+                    // gentle sharpening for crisp text
+                    val blur = Mat()
+                    Imgproc.GaussianBlur(g, blur, Size(0.0, 0.0), 1.2)
+                    Core.addWeighted(g, 1.5, blur, -0.5, 0.0, g)
+                    Imgproc.cvtColor(g, result, Imgproc.COLOR_GRAY2RGBA)
+                    g.release(); blur.release()
+                }
+                magic.release()
+            }
             ScanFilter.MAGIC -> {
                 val rgb = Mat()
                 Imgproc.cvtColor(rgba, rgb, Imgproc.COLOR_RGBA2RGB)
@@ -178,6 +196,38 @@ object Scanner {
         Utils.matToBitmap(result, out)
         rgba.release(); result.release()
         return out
+    }
+
+    /** Magic colour: lighting flattened per channel plus a little contrast. Returns an RGB Mat. */
+    private fun magicColor(rgba: Mat): Mat {
+        val rgb = Mat()
+        Imgproc.cvtColor(rgba, rgb, Imgproc.COLOR_RGBA2RGB)
+        val channels = ArrayList<Mat>()
+        Core.split(rgb, channels)
+        val outCh = channels.map { ch -> flattenLighting(ch).also { ch.release() } }
+        val merged = Mat()
+        Core.merge(outCh, merged)
+        merged.convertTo(merged, -1, 1.15, -18.0)
+        outCh.forEach { it.release() }
+        rgb.release()
+        return merged
+    }
+
+    /** True if more than ~1.2% of the page has noticeable colour (stamps, photos, coloured ink, logos). */
+    private fun isColourful(rgba: Mat): Boolean {
+        val small = Mat()
+        val scale = 400.0 / max(rgba.cols(), rgba.rows())
+        Imgproc.resize(rgba, small, Size(rgba.cols() * scale, rgba.rows() * scale), 0.0, 0.0, Imgproc.INTER_AREA)
+        val rgb = Mat(); Imgproc.cvtColor(small, rgb, Imgproc.COLOR_RGBA2RGB)
+        val hsv = Mat(); Imgproc.cvtColor(rgb, hsv, Imgproc.COLOR_RGB2HSV)
+        val ch = ArrayList<Mat>(); Core.split(hsv, ch)
+        val satMask = Mat(); Imgproc.threshold(ch[1], satMask, 70.0, 255.0, Imgproc.THRESH_BINARY)
+        val valMask = Mat(); Imgproc.threshold(ch[2], valMask, 60.0, 255.0, Imgproc.THRESH_BINARY)
+        Core.bitwise_and(satMask, valMask, satMask)
+        val frac = Core.countNonZero(satMask).toDouble() / (satMask.rows() * satMask.cols()).coerceAtLeast(1)
+        listOf(small, rgb, hsv, satMask, valMask).forEach { it.release() }
+        ch.forEach { it.release() }
+        return frac > 0.012
     }
 
     /**

@@ -20,6 +20,34 @@ class SettingsActivity : BaseActivity() {
             prefs.edit().putString(Settings.SCANNER, if (id == R.id.scannerAi) "ai" else "builtin").apply()
         }
 
+        // default scan filter
+        val filterGroup = findViewById<com.google.android.material.chip.ChipGroup>(R.id.filterGroup)
+        val filterHint = findViewById<android.widget.TextView>(R.id.filterHint)
+        fun hint(f: ScanFilter) = when (f) {
+            ScanFilter.AUTO -> "Removes shadows, keeps colour only when the page has colour (recommended)"
+            ScanFilter.ORIGINAL -> "Keeps the photo exactly as captured"
+            ScanFilter.MAGIC -> "Removes shadows and brightens, always in colour"
+            ScanFilter.GRAY -> "Greyscale, no shadow removal"
+            ScanFilter.BW -> "Pure black & white, sharpest for printed text"
+        }
+        val current = Settings.defaultFilter(this)
+        for (f in ScanFilter.values()) {
+            val chip = com.google.android.material.chip.Chip(this).apply {
+                id = android.view.View.generateViewId()
+                text = if (f == ScanFilter.AUTO) "Auto ✦" else f.label
+                isCheckable = true
+                tag = f
+            }
+            filterGroup.addView(chip)
+            if (f == current) chip.isChecked = true
+        }
+        filterHint.text = hint(current)
+        filterGroup.setOnCheckedStateChangeListener { g, ids ->
+            val f = ids.firstOrNull()?.let { g.findViewById<com.google.android.material.chip.Chip>(it) }?.tag as? ScanFilter ?: return@setOnCheckedStateChangeListener
+            prefs.edit().putString(Settings.DEFAULT_FILTER, f.name).apply()
+            filterHint.text = hint(f)
+        }
+
         val ocr = findViewById<RadioGroup>(R.id.ocr)
         ocr.check(if (Ocr.script(this) == Ocr.Script.DEVANAGARI) R.id.ocrDeva else R.id.ocrLatin)
         ocr.setOnCheckedChangeListener { _, id ->

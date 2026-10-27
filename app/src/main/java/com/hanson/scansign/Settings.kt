@@ -9,9 +9,13 @@ object Settings {
     const val OCR_SCRIPT = "ocr_script"     // Ocr.Script name
     const val SEARCHABLE = "searchable"     // add OCR text layer when saving scans
     const val PAGE_SIZE = "size"            // PageSize name (shared with the save dialog)
+    const val DEFAULT_FILTER = "default_filter"
 
     fun prefs(ctx: Context): SharedPreferences = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
     fun useAiScanner(ctx: Context) = prefs(ctx).getString(SCANNER, "ai") == "ai"
     fun searchableDefault(ctx: Context) = prefs(ctx).getBoolean(SEARCHABLE, true)
+
+    fun defaultFilter(ctx: Context): ScanFilter =
+        runCatching { ScanFilter.valueOf(prefs(ctx).getString(DEFAULT_FILTER, ScanFilter.AUTO.name)!!) }.getOrDefault(ScanFilter.AUTO)
 }

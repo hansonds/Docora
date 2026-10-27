@@ -125,6 +125,96 @@ class SignaturesActivity : BaseActivity() {
         finish()
     }
 
+    /** Options for a saved signature: use, share / save as transparent PNG, delete. */
+    private fun options(f: File) {
+        val items = ArrayList<CharSequence>()
+        val actions = ArrayList<() -> Unit>()
+        if (pickMode) { items.add("Use this signature"); actions.add { returnSignature(f) } }
+        items.add("Share as PNG (transparent)"); actions.add { shareGuide(f) }
+        items.add("Save PNG to Downloads"); actions.add { savePng(f) }
+        items.add("Delete"); actions.add { confirmDelete(f) }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Signature")
+            .setItems(items.toTypedArray()) { _, i -> actions[i]() }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun pngName() = "Docora_signature_${java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())}.png"
+
+    /** Explains how to keep the transparent background before opening the share menu. */
+    private fun shareGuide(f: File) {
+        val prefs = getSharedPreferences("hints", MODE_PRIVATE)
+        if (prefs.getBoolean("png_share_ok", false)) { sharePng(f); return }
+        val msg = "Your signature is a PNG with a transparent background, so it can be placed on any document.\n\n" +
+            "📎 WhatsApp: send it as a DOCUMENT, not as a photo.\n" +
+            "   1. Tap Save PNG first (it goes to Downloads › Docora)\n" +
+            "   2. In WhatsApp tap 📎 → Document → pick the PNG\n" +
+            "   Sending it as a photo turns the background black or white.\n\n" +
+            "✉ Email, Google Drive, Telegram (as file): the transparency is kept.\n\n" +
+            "If you share straight to WhatsApp from here, it may be sent as a photo."
+        val box = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL }
+        box.addView(android.widget.TextView(this).apply { text = msg; setLineSpacing(0f, 1.2f) })
+        val dont = android.widget.CheckBox(this).apply { text = "Don't show this again" }
+        box.addView(dont)
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Keep the transparent background")
+            .setView(Ui.padded(this, box))
+            .setPositiveButton("Share") { _, _ ->
+                if (dont.isChecked) prefs.edit().putBoolean("png_share_ok", true).apply()
+                sharePng(f)
+            }
+            .setNeutralButton("Save PNG") { _, _ ->
+                if (dont.isChecked) prefs.edit().putBoolean("png_share_ok", true).apply()
+                savePng(f)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun sharePng(f: File) {
+        // share a copy with a friendly name; image/png keeps the file untouched when the receiver supports files
+        val out = File(File(cacheDir, "share").apply { mkdirs() }, pngName())
+        f.copyTo(out, overwrite = true)
+        val uri = Storage.uriFor(this, out)
+        val i = Intent(Intent.ACTION_SEND).apply {
+            type = "image/png"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(i, "Share signature (PNG)"))
+    }
+
+    private fun savePng(f: File) {
+        lifecycleScope.launch {
+            val name = pngName()
+            val ok = withContext(Dispatchers.IO) {
+                try {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                        val values = android.content.ContentValues().apply {
+                            put(android.provider.MediaStore.Downloads.DISPLAY_NAME, name)
+                            put(android.provider.MediaStore.Downloads.MIME_TYPE, "image/png")
+                            put(android.provider.MediaStore.Downloads.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/Docora")
+                        }
+                        val uri = contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return@withContext false
+                        contentResolver.openOutputStream(uri)?.use { out -> f.inputStream().use { it.copyTo(out) } }
+                        true
+                    } else {
+                        val dir = File(getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS), "Docora").apply { mkdirs() }
+                        f.copyTo(File(dir, name), overwrite = true)
+                        true
+                    }
+                } catch (e: Throwable) { false }
+            }
+            if (ok) MaterialAlertDialogBuilder(this@SignaturesActivity)
+                .setTitle("Saved")
+                .setMessage("$name\n\nSaved in Downloads › Docora.\n\nTo send it on WhatsApp with the transparent background: 📎 → Document → Downloads › Docora → pick this file.")
+                .setPositiveButton("OK", null)
+                .show()
+            else Toast.makeText(this@SignaturesActivity, "Could not save the PNG", Toast.LENGTH_LONG).show()
+        }
+    }
+
     private fun confirmDelete(f: File) {
         MaterialAlertDialogBuilder(this)
             .setTitle("Delete this signature?")
@@ -152,9 +242,9 @@ class SignaturesActivity : BaseActivity() {
                 if (holder.image.tag == f.absolutePath) holder.image.setImageBitmap(bmp)
             }
             holder.itemView.setOnClickListener {
-                if (pickMode) returnSignature(f) else confirmDelete(f)
+                if (pickMode) returnSignature(f) else options(f)
             }
-            holder.itemView.setOnLongClickListener { confirmDelete(f); true }
+            holder.itemView.setOnLongClickListener { options(f); true }
         }
     }
 }

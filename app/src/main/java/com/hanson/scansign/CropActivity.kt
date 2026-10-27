@@ -67,7 +67,7 @@ class CropActivity : BaseActivity() {
     private var source: Bitmap? = null
     private var warped: Bitmap? = null
     private var warpedSmall: Bitmap? = null
-    private var filter = ScanFilter.MAGIC
+    private var filter = ScanFilter.AUTO
     private var mode = MODE_DOC
     private var inFilterStep = false
     private var busy = false
@@ -88,9 +88,7 @@ class CropActivity : BaseActivity() {
         btnNext = findViewById(R.id.btnNext)
 
         mode = intent.getStringExtra(EXTRA_MODE) ?: MODE_DOC
-        filter = runCatching {
-            ScanFilter.valueOf(getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_FILTER, ScanFilter.MAGIC.name)!!)
-        }.getOrDefault(ScanFilter.MAGIC)
+        filter = Settings.defaultFilter(this)
 
         toolbar.setNavigationOnClickListener { goBack() }
         val isSig = mode == MODE_SIG
@@ -156,7 +154,6 @@ class CropActivity : BaseActivity() {
         filterGroup.setOnCheckedStateChangeListener { group, ids ->
             val chip = ids.firstOrNull()?.let { group.findViewById<Chip>(it) } ?: return@setOnCheckedStateChangeListener
             filter = chip.tag as ScanFilter
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_FILTER, filter.name).apply()
             refreshPreview()
         }
     }
@@ -269,7 +266,7 @@ class CropActivity : BaseActivity() {
         }
         hint.text = when {
             isSig -> "Fit the signature inside the 4:3 box. Drag to move, drag a corner to resize."
-            show -> "Magic color removes shadows · Black & white is best for text"
+            show -> "Auto removes shadows and picks colour or greyscale · change the default in Settings"
             else -> "Drag the corners or edges to fit the page. A magnifier helps with precision."
         }
     }
