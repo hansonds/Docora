@@ -149,7 +149,9 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="20dp"
-                android:text="Made with ♥ by Hanson · phoenicx.org"
+                android:gravity="center"
+                android:lineSpacingMultiplier="1.3"
+                android:text="Made with ♥ by Hanson\nphoenicx.org"
                 android:textAppearance="@style/TextAppearance.Material3.BodySmall"
                 android:textColor="?attr/colorOnSurfaceVariant" />
         </LinearLayout>
