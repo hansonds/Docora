@@ -1,0 +1,294 @@
+package com.hanson.scansign
+
+import android.content.Context
+import android.graphics.PointF
+import android.graphics.RectF
+import android.graphics.pdf.PdfRenderer
+import android.os.ParcelFileDescriptor
+import com.tom_roush.pdfbox.cos.COSDictionary
+import com.tom_roush.pdfbox.io.MemoryUsageSetting
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.encryption.InvalidPasswordException
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationWidget
+import com.tom_roush.pdfbox.pdmodel.interactive.form.PDCheckBox
+import com.tom_roush.pdfbox.pdmodel.interactive.form.PDChoice
+import com.tom_roush.pdfbox.pdmodel.interactive.form.PDComboBox
+import com.tom_roush.pdfbox.pdmodel.interactive.form.PDRadioButton
+import com.tom_roush.pdfbox.pdmodel.interactive.form.PDSignatureField
+import com.tom_roush.pdfbox.pdmodel.interactive.form.PDTextField
+import java.io.File
+import kotlin.math.max
+import kotlin.math.min
+
+/** Page box + rotation; converts between displayed coordinates (top-left origin) and PDF user space. */
+data class PageGeom(val llx: Float, val lly: Float, val w: Float, val h: Float, val rot: Int) {
+    val dispW: Float get() = if (rot == 90 || rot == 270) h else w
+    val dispH: Float get() = if (rot == 90 || rot == 270) w else h
+
+    /** Displayed (u, v; v downward, in points) -> PDF user space (x, y; y upward). */
+    fun toUser(u: Float, v: Float): PointF = when (rot) {
+        90 -> PointF(llx + v, lly + u)
+        180 -> PointF(llx + w - u, lly + v)
+        270 -> PointF(llx + w - v, lly + h - u)
+        else -> PointF(llx + u, lly + h - v)
+    }
+
+    /** PDF user space -> displayed coordinates. */
+    fun toDisp(x: Float, y: Float): PointF = when (rot) {
+        90 -> PointF(y - lly, x - llx)
+        180 -> PointF(llx + w - x, y - lly)
+        270 -> PointF(lly + h - y, llx + w - x)
+        else -> PointF(x - llx, lly + h - y)
+    }
+
+    /** A user-space rectangle as fractions (0..1) of the displayed page. */
+    fun userRectToFrac(x1: Float, y1: Float, x2: Float, y2: Float): RectF {
+        val a = toDisp(x1, y1)
+        val b = toDisp(x2, y2)
+        return RectF(
+            min(a.x, b.x) / dispW, min(a.y, b.y) / dispH,
+            max(a.x, b.x) / dispW, max(a.y, b.y) / dispH
+        )
+    }
+}
+
+enum class TextFont(val label: String) { SANS("Sans"), SERIF("Serif"), MONO("Mono") }
+
+/** Something the user added on top of a page. Positions are fractions of the displayed page (top-left origin). */
+sealed class EditItem {
+    abstract val page: Int
+    abstract var fx: Float
+    abstract var fy: Float
+}
+
+class SignatureItem(
+    override val page: Int,
+    val file: File,
+    override var fx: Float,
+    override var fy: Float,
+    var fw: Float,
+    var fh: Float
+) : EditItem()
+
+class TextItem(
+    override val page: Int,
+    var text: String,
+    var color: Int,
+    var sizePt: Float,
+    var bold: Boolean,
+    var font: TextFont,
+    override var fx: Float,
+    override var fy: Float
+) : EditItem()
+
+enum class FieldType { TEXT, CHECKBOX, RADIO, CHOICE, SIGNATURE }
+
+/** One fillable field of the PDF form. */
+class FormField(
+    val name: String,
+    val type: FieldType,
+    val label: String,
+    val multiline: Boolean,
+    val readOnly: Boolean,
+    val optionsDisplay: List<String>,
+    val optionsExport: List<String>,
+    val editableChoice: Boolean,
+    val original: String,
+    var value: String
+) {
+    val changed: Boolean get() = value != original
+}
+
+/** Where a field appears on a page. [onValue] is the "checked" state name for checkboxes / radio buttons. */
+class FormWidget(val field: FormField, val page: Int, val rect: RectF, val onValue: String?)
+
+class OpenedPdf(
+    /** File that PdfRenderer can display and PDFBox can edit (decrypted / repaired copy if needed). */
+    val file: File,
+    val geoms: List<PageGeom>,
+    val fields: List<FormField>,
+    val widgets: List<FormWidget>,
+    val editable: Boolean
+)
+
+sealed class OpenResult {
+    class Ok(val pdf: OpenedPdf) : OpenResult()
+    object NeedPassword : OpenResult()
+    object WrongPassword : OpenResult()
+    class Error(val message: String) : OpenResult()
+}
+
+object PdfOpener {
+
+    fun memory(): MemoryUsageSetting = MemoryUsageSetting.setupMixed(48L * 1024 * 1024)
+
+    /** Opens any PDF: handles passwords, encryption and damaged files. Call off the main thread. */
+    fun open(ctx: Context, src: File, password: String?): OpenResult {
+        var renderFile = src
+        var geoms: List<PageGeom>? = null
+        var fields: List<FormField> = emptyList()
+        var widgets: List<FormWidget> = emptyList()
+        var editable = true
+
+        try {
+            PDDocument.load(src, password ?: "", memory()).use { doc ->
+                if (doc.isEncrypted) {
+                    // remove the security so it can be displayed and edited
+                    doc.setAllSecurityToBeRemoved(true)
+                    val dec = Storage.newWorkFile(ctx, "pdf")
+                    doc.save(dec)
+                    renderFile = dec
+                }
+                geoms = readGeoms(doc)
+                val (f, w) = readForm(doc)
+                fields = f
+                widgets = w
+            }
+        } catch (e: InvalidPasswordException) {
+            return if (password == null) OpenResult.NeedPassword else OpenResult.WrongPassword
+        } catch (e: Throwable) {
+            // PDFBox could not parse it; maybe the viewer still can
+            editable = false
+        }
+
+        // make sure the system renderer can display it; if not, let PDFBox rewrite (repair) it
+        if (!canRender(renderFile)) {
+            if (!editable) return OpenResult.Error("This file is damaged or is not a PDF.")
+            try {
+                val repaired = Storage.newWorkFile(ctx, "pdf")
+                PDDocument.load(renderFile, password ?: "", memory()).use { doc ->
+                    doc.setAllSecurityToBeRemoved(true)
+                    doc.save(repaired)
+                }
+                if (!canRender(repaired)) return OpenResult.Error("This PDF can't be displayed.")
+                renderFile = repaired
+            } catch (e: Throwable) {
+                return OpenResult.Error("This PDF can't be displayed.")
+            }
+        }
+
+        val g = geoms ?: rendererGeoms(renderFile) ?: return OpenResult.Error("This PDF has no pages.")
+        if (g.isEmpty()) return OpenResult.Error("This PDF has no pages.")
+        return OpenResult.Ok(OpenedPdf(renderFile, g, fields, widgets, editable))
+    }
+
+    private fun canRender(f: File): Boolean = try {
+        ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
+            PdfRenderer(fd).use { it.pageCount > 0 }
+        }
+    } catch (e: Throwable) {
+        false
+    }
+
+    private fun rendererGeoms(f: File): List<PageGeom>? = try {
+        ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
+            PdfRenderer(fd).use { r ->
+                (0 until r.pageCount).map { i ->
+                    val p = r.openPage(i)
+                    try { PageGeom(0f, 0f, p.width.toFloat(), p.height.toFloat(), 0) } finally { p.close() }
+                }
+            }
+        }
+    } catch (e: Throwable) {
+        null
+    }
+
+    private fun readGeoms(doc: PDDocument): List<PageGeom> {
+        val out = ArrayList<PageGeom>(doc.numberOfPages)
+        for (page in doc.pages) {
+            val box = page.cropBox
+            val rot = ((page.rotation % 360) + 360) % 360
+            out.add(PageGeom(box.lowerLeftX, box.lowerLeftY, box.width.coerceAtLeast(1f), box.height.coerceAtLeast(1f), rot))
+        }
+        return out
+    }
+
+    private fun readForm(doc: PDDocument): Pair<List<FormField>, List<FormWidget>> {
+        val form = doc.documentCatalog.acroForm ?: return Pair(emptyList(), emptyList())
+        val fields = ArrayList<FormField>()
+        val widgets = ArrayList<FormWidget>()
+        var annotPageIndex: HashMap<COSDictionary, Int>? = null
+
+        fun pageOf(w: PDAnnotationWidget): Int {
+            val p = w.page
+            if (p != null) {
+                val i = doc.pages.indexOf(p)
+                if (i >= 0) return i
+            }
+            // widget without /P: build an index once
+            val idx = annotPageIndex ?: HashMap<COSDictionary, Int>().also { map ->
+                var i = 0
+                for (pg in doc.pages) {
+                    try { pg.annotations.forEach { a -> map[a.cosObject] = i } } catch (_: Exception) {}
+                    i++
+                }
+                annotPageIndex = map
+            }
+            return idx[w.cosObject] ?: -1
+        }
+
+        val geoms = readGeoms(doc)
+        for (f in form.fieldTree) {
+            try {
+                val type = when (f) {
+                    is PDTextField -> FieldType.TEXT
+                    is PDCheckBox -> FieldType.CHECKBOX
+                    is PDRadioButton -> FieldType.RADIO
+                    is PDChoice -> FieldType.CHOICE
+                    is PDSignatureField -> FieldType.SIGNATURE
+                    else -> null
+                } ?: continue
+                val ws = f.widgets ?: continue
+                if (ws.isEmpty()) continue
+                val value = when (f) {
+                    is PDCheckBox -> f.value ?: "Off"
+                    is PDRadioButton -> f.value ?: "Off"
+                    is PDChoice -> f.value?.firstOrNull() ?: ""
+                    is PDSignatureField -> ""
+                    else -> f.valueAsString ?: ""
+                }
+                val display = if (f is PDChoice) safe { f.optionsDisplayValues } ?: emptyList() else emptyList()
+                val export = if (f is PDChoice) safe { f.optionsExportValues } ?: emptyList() else emptyList()
+                val field = FormField(
+                    name = f.fullyQualifiedName,
+                    type = type,
+                    label = (f.alternateFieldName ?: f.partialName ?: f.fullyQualifiedName).trim(),
+                    multiline = f is PDTextField && f.isMultiline,
+                    readOnly = f.isReadOnly,
+                    optionsDisplay = display,
+                    optionsExport = export,
+                    editableChoice = f is PDComboBox && f.isEdit,
+                    original = value,
+                    value = value
+                )
+                var added = false
+                for (w in ws) {
+                    val pi = pageOf(w)
+                    if (pi !in geoms.indices) continue
+                    val r = w.rectangle ?: continue
+                    val frac = geoms[pi].userRectToFrac(r.lowerLeftX, r.lowerLeftY, r.upperRightX, r.upperRightY)
+                    if (frac.width() <= 0f || frac.height() <= 0f) continue
+                    val on = if (type == FieldType.CHECKBOX || type == FieldType.RADIO) onStateOf(w) else null
+                    widgets.add(FormWidget(field, pi, frac, on))
+                    added = true
+                }
+                if (added) fields.add(field)
+            } catch (_: Throwable) {
+                // skip fields we can't understand
+            }
+        }
+        return Pair(fields, widgets)
+    }
+
+    /** The appearance state name that means "on" for a checkbox / radio widget. */
+    private fun onStateOf(w: PDAnnotationWidget): String? = try {
+        val n = w.appearance?.normalAppearance
+        if (n != null && n.isSubDictionary) {
+            n.subDictionary.keys.map { it.name }.firstOrNull { it != "Off" }
+        } else null
+    } catch (e: Throwable) {
+        null
+    } ?: "Yes"
+
+    private inline fun <T> safe(block: () -> T): T? = try { block() } catch (e: Throwable) { null }
+}
