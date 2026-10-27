@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="brand">#2457F5</color>
+    <color name="brand_dark">#1A3FB8</color>
+    <color name="brand_purple">#6A3DF0</color>
+    <color name="accent">#00C2A8</color>
+    <color name="surface_dark">#0E1116</color>
+    <color name="launcher_bg">#2457F5</color>
+    <color name="danger">#E5484D</color>
+
+    <color name="md_primary">#2457F5</color>
+    <color name="md_on_primary">#FFFFFF</color>
+    <color name="md_primary_container">#DCE4FF</color>
+    <color name="md_on_primary_container">#001652</color>
+    <color name="md_secondary">#00A893</color>
+    <color name="md_secondary_container">#C9F5EE</color>
+    <color name="md_on_secondary_container">#00201C</color>
+    <color name="md_background">#F6F7FB</color>
+    <color name="md_surface">#FFFFFF</color>
+    <color name="md_surface_variant">#E7EAF3</color>
+    <color name="md_on_surface">#151922</color>
+    <color name="md_on_surface_variant">#5A6275</color>
+    <color name="md_outline">#C3C8D6</color>
+    <color name="viewer_bg">#E3E6EE</color>
+    <color name="icon_tile_1">#E3EAFF</color>
+    <color name="icon_tile_2">#DDF7F2</color>
+    <color name="icon_tile_3">#FFEBDD</color>
+    <color name="icon_tile_4">#EFE5FF</color>
+</resources>
