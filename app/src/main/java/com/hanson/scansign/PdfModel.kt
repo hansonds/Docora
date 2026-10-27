@@ -66,6 +66,16 @@ sealed class EditItem {
     abstract fun copy(): EditItem
 }
 
+/** Rotation of an item (only signatures / images and text / stamps can rotate). */
+var EditItem.rotationDeg: Float
+    get() = when (this) { is SignatureItem -> rotation; is TextItem -> rotation; else -> 0f }
+    set(v) {
+        val n = ((v % 360f) + 360f) % 360f
+        when (this) { is SignatureItem -> rotation = n; is TextItem -> rotation = n; else -> {} }
+    }
+
+val EditItem.canRotate: Boolean get() = this is SignatureItem || this is TextItem
+
 /** A picture on the page: a signature (transparent PNG) or any photo / image. */
 class SignatureItem(
     override val page: Int,
@@ -73,9 +83,11 @@ class SignatureItem(
     override var fx: Float,
     override var fy: Float,
     var fw: Float,
-    var fh: Float
+    var fh: Float,
+    /** Clockwise rotation in degrees, around the item's centre. */
+    var rotation: Float = 0f
 ) : EditItem() {
-    override fun copy() = SignatureItem(page, file, fx, fy, fw, fh)
+    override fun copy() = SignatureItem(page, file, fx, fy, fw, fh, rotation)
 }
 
 class TextItem(
@@ -88,9 +100,11 @@ class TextItem(
     override var fx: Float,
     override var fy: Float,
     /** Draw a rounded frame around the text (stamps). */
-    var boxed: Boolean = false
+    var boxed: Boolean = false,
+    /** Clockwise rotation in degrees, around the item's centre. */
+    var rotation: Float = 0f
 ) : EditItem() {
-    override fun copy() = TextItem(page, text, color, sizePt, bold, font, fx, fy, boxed)
+    override fun copy() = TextItem(page, text, color, sizePt, bold, font, fx, fy, boxed, rotation)
 }
 
 /** One freehand pen / highlighter stroke. Points are page fractions. */

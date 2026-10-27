@@ -81,10 +81,20 @@ object ItemRender {
         fun y(f: Float) = pr.top + f * pr.height()
         when (item) {
             is SignatureItem -> bitmap(item)?.let {
-                canvas.drawBitmap(it, null, RectF(x(item.fx), y(item.fy), x(item.fx + item.fw), y(item.fy + item.fh)),
-                    Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG))
+                val r = RectF(x(item.fx), y(item.fy), x(item.fx + item.fw), y(item.fy + item.fh))
+                canvas.save()
+                if (item.rotation != 0f) canvas.rotate(item.rotation, r.centerX(), r.centerY())
+                canvas.drawBitmap(it, null, r, Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG))
+                canvas.restore()
             }
-            is TextItem -> TextRender.draw(canvas, item, x(item.fx), y(item.fy), pxPerPt)
+            is TextItem -> {
+                val (w, h) = TextRender.sizePt(item)
+                val l = x(item.fx); val t = y(item.fy)
+                canvas.save()
+                if (item.rotation != 0f) canvas.rotate(item.rotation, l + w * pxPerPt / 2, t + h * pxPerPt / 2)
+                TextRender.draw(canvas, item, l, t, pxPerPt)
+                canvas.restore()
+            }
             is InkItem -> {
                 if (item.points.isEmpty()) return
                 val p = strokePaint(item.color, item.widthPt * pxPerPt, item.alpha)

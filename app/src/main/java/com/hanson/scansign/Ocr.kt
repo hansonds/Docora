@@ -13,11 +13,14 @@ import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 /** One recognised line of text and where it is in the image (pixels). */
 class OcrLine(val text: String, val box: Rect)
 
+/** One recognised word; [lineEnd] = last word of its line. */
+class OcrWord(val text: String, val box: Rect, val lineEnd: Boolean)
+
 /** On-device text recognition (Google ML Kit, works offline). Call from a background thread. */
 object Ocr {
 
     enum class Script(val label: String) {
-        LATIN("English & other Latin-script languages"),
+        LATIN("English, German, French, Spanish, Italian & other Latin-script languages"),
         DEVANAGARI("Hindi, Marathi, Nepali (Devanagari)")
     }
 
@@ -43,6 +46,25 @@ object Ocr {
                 }
             }
             return Pair(result.text, lines)
+        } finally {
+            try { c.close() } catch (_: Throwable) {}
+        }
+    }
+
+    /** Words with positions, in reading order (for selecting text on a page). */
+    fun words(ctx: Context, bmp: Bitmap): List<OcrWord> {
+        val c = client(script(ctx))
+        try {
+            val result = Tasks.await(c.process(InputImage.fromBitmap(bmp, 0)))
+            val out = ArrayList<OcrWord>()
+            for (block in result.textBlocks) for (line in block.lines) {
+                val els = line.elements
+                els.forEachIndexed { i, e ->
+                    val box = e.boundingBox ?: return@forEachIndexed
+                    out.add(OcrWord(e.text, box, i == els.size - 1))
+                }
+            }
+            return out
         } finally {
             try { c.close() } catch (_: Throwable) {}
         }

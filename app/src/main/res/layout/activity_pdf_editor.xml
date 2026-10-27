@@ -49,6 +49,41 @@
             android:textColor="#0A143C"
             android:visibility="gone" />
 
+        <LinearLayout
+            android:id="@+id/textBar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_page_pill"
+            android:elevation="6dp"
+            android:orientation="horizontal"
+            android:paddingHorizontal="4dp"
+            android:visibility="gone">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/selCopy"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="44dp"
+                android:text="Copy"
+                android:textColor="#FFFFFF" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/selAll"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="44dp"
+                android:text="Select all"
+                android:textColor="#FFFFFF" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/selShare"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="44dp"
+                android:text="Share"
+                android:textColor="#FFFFFF" />
+        </LinearLayout>
+
         <TextView
             android:id="@+id/pagePill"
             android:layout_width="wrap_content"
