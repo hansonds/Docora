@@ -54,12 +54,15 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         val toolbar = findViewById<MaterialToolbar>(R.id.toolbar)
-        toolbar.menu.add(0, 1, 0, "About").apply {
-            setIcon(R.drawable.ic_info)
-            setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
-        }
+        toolbar.menu.add(0, 2, 0, "Search").apply { setIcon(R.drawable.ic_search); setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS) }
+        toolbar.menu.add(0, 3, 1, "Settings").apply { setIcon(R.drawable.ic_settings); setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS) }
+        toolbar.menu.add(0, 1, 2, "About").apply { setIcon(R.drawable.ic_info); setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS) }
         toolbar.setOnMenuItemClickListener {
-            startActivity(Intent(this, AboutActivity::class.java))
+            when (it.itemId) {
+                1 -> startActivity(Intent(this, AboutActivity::class.java))
+                2 -> toggleSearch()
+                3 -> startActivity(Intent(this, SettingsActivity::class.java))
+            }
             true
         }
 
@@ -73,19 +76,29 @@ class MainActivity : AppCompatActivity() {
         findViewById<MaterialButton>(R.id.btnScan).setOnClickListener {
             startActivity(ScanActivity.intent(this, ScanActivity.START_CAMERA))
         }
-        tile(R.id.tileOpen, R.drawable.ic_folder, R.color.icon_tile_1, R.color.brand, "Open PDF", "View, zoom & sign") {
+        tile(R.id.tileOpen, R.drawable.ic_folder, R.color.icon_tile_1, R.color.brand, "Open PDF", "View, edit, sign, fill") {
             openPdf.launch(arrayOf("application/pdf"))
         }
         tile(R.id.tileImport, R.drawable.ic_photo, R.color.icon_tile_2, R.color.md_secondary, "From photos", "Turn images into PDF") {
             startActivity(ScanActivity.intent(this, ScanActivity.START_GALLERY))
         }
-        tile(R.id.tileForm, R.drawable.ic_form, R.color.icon_tile_3, R.color.danger, "Fill a form", "Type into PDF forms") {
-            openPdf.launch(arrayOf("application/pdf"))
+        tile(R.id.tileForm, R.drawable.ic_tools, R.color.icon_tile_3, R.color.danger, "PDF Tools", "Merge, split, compress, OCR…") {
+            startActivity(Intent(this, ToolsActivity::class.java))
         }
         tile(R.id.tileSigs, R.drawable.ic_sign, R.color.icon_tile_4, R.color.brand_purple, "Signatures", "Create & manage") {
             startActivity(SignaturesActivity.intent(this, pick = false))
         }
         btnResume.setOnClickListener { startActivity(ScanActivity.intent(this, null)) }
+        sortBtn = findViewById(R.id.btnSortList)
+        sortBtn.setOnClickListener { chooseSort() }
+        sort = runCatching { Sort.valueOf(getSharedPreferences("lib", MODE_PRIVATE).getString("sort", Sort.NEWEST.name)!!) }.getOrDefault(Sort.NEWEST)
+        sortBtn.text = sort.label
+        searchBox = findViewById(R.id.searchBox)
+        findViewById<android.widget.EditText>(R.id.search).addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) { query = s?.toString().orEmpty(); reload() }
+        })
 
         if (!App.openCvReady) {
             Toast.makeText(this, "Edge detection engine failed to load — manual cropping still works", Toast.LENGTH_LONG).show()
@@ -140,10 +153,52 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private enum class Sort(val label: String) { NEWEST("Newest"), OLDEST("Oldest"), NAME("Name"), SIZE("Largest") }
+    private var sort = Sort.NEWEST
+    private var query = ""
+    private lateinit var sortBtn: MaterialButton
+    private lateinit var searchBox: View
+
+    private fun toggleSearch() {
+        val show = searchBox.visibility != View.VISIBLE
+        searchBox.visibility = if (show) View.VISIBLE else View.GONE
+        val et = findViewById<android.widget.EditText>(R.id.search)
+        if (show) {
+            et.requestFocus()
+            (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).showSoftInput(et, 0)
+        } else {
+            et.setText("")
+            (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(et.windowToken, 0)
+        }
+    }
+
+    private fun chooseSort() {
+        val opts = Sort.values()
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Sort by")
+            .setSingleChoiceItems(opts.map { it.label as CharSequence }.toTypedArray(), sort.ordinal) { d, w ->
+                sort = opts[w]
+                getSharedPreferences("lib", MODE_PRIVATE).edit().putString("sort", sort.name).apply()
+                sortBtn.text = sort.label
+                reload()
+                d.dismiss()
+            }
+            .show()
+    }
+
     private fun reload() {
-        files = Storage.listPdfs(this)
+        val all = Storage.listPdfs(this)
+        val q = query.trim()
+        val filtered = if (q.isEmpty()) all else all.filter { it.name.contains(q, ignoreCase = true) }
+        files = when (sort) {
+            Sort.NEWEST -> filtered.sortedByDescending { it.lastModified() }
+            Sort.OLDEST -> filtered.sortedBy { it.lastModified() }
+            Sort.NAME -> filtered.sortedBy { it.name.lowercase() }
+            Sort.SIZE -> filtered.sortedByDescending { it.length() }
+        }
         adapter.notifyDataSetChanged()
         empty.visibility = if (files.isEmpty()) View.VISIBLE else View.GONE
+        empty.text = if (query.isNotBlank()) "No files match \"$query\"." else "No files yet.\nScanned and signed PDFs appear here."
         count.text = if (files.isEmpty()) "" else "${files.size}"
         val n = ScanSession.pages.size
         btnResume.visibility = if (n > 0) View.VISIBLE else View.GONE

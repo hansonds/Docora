@@ -63,8 +63,10 @@ sealed class EditItem {
     abstract val page: Int
     abstract var fx: Float
     abstract var fy: Float
+    abstract fun copy(): EditItem
 }
 
+/** A picture on the page: a signature (transparent PNG) or any photo / image. */
 class SignatureItem(
     override val page: Int,
     val file: File,
@@ -72,7 +74,9 @@ class SignatureItem(
     override var fy: Float,
     var fw: Float,
     var fh: Float
-) : EditItem()
+) : EditItem() {
+    override fun copy() = SignatureItem(page, file, fx, fy, fw, fh)
+}
 
 class TextItem(
     override val page: Int,
@@ -82,8 +86,52 @@ class TextItem(
     var bold: Boolean,
     var font: TextFont,
     override var fx: Float,
+    override var fy: Float,
+    /** Draw a rounded frame around the text (stamps). */
+    var boxed: Boolean = false
+) : EditItem() {
+    override fun copy() = TextItem(page, text, color, sizePt, bold, font, fx, fy, boxed)
+}
+
+/** One freehand pen / highlighter stroke. Points are page fractions. */
+class InkItem(
+    override val page: Int,
+    val points: MutableList<PointF>,
+    var color: Int,
+    var widthPt: Float,
+    /** 1 = pen, < 1 = highlighter. */
+    var alpha: Float
+) : EditItem() {
+    override var fx: Float
+        get() = points.minOfOrNull { it.x } ?: 0f
+        set(v) { val d = v - fx; points.forEach { it.x += d } }
     override var fy: Float
-) : EditItem()
+        get() = points.minOfOrNull { it.y } ?: 0f
+        set(v) { val d = v - fy; points.forEach { it.y += d } }
+    override fun copy() = InkItem(page, points.map { PointF(it.x, it.y) }.toMutableList(), color, widthPt, alpha)
+}
+
+enum class ShapeKind(val label: String) {
+    RECT("Box"), ELLIPSE("Circle"), LINE("Line"), ARROW("Arrow"), WHITEOUT("Whiteout"), HIGHLIGHT("Highlight box")
+}
+
+/**
+ * A shape. For RECT / ELLIPSE / WHITEOUT / HIGHLIGHT the box is (fx, fy, fw, fh).
+ * For LINE / ARROW it runs from (fx, fy) to (fx + fw, fy + fh) (fw / fh may be negative).
+ */
+class ShapeItem(
+    override val page: Int,
+    val kind: ShapeKind,
+    override var fx: Float,
+    override var fy: Float,
+    var fw: Float,
+    var fh: Float,
+    var color: Int,
+    var widthPt: Float
+) : EditItem() {
+    override fun copy() = ShapeItem(page, kind, fx, fy, fw, fh, color, widthPt)
+    val isLine: Boolean get() = kind == ShapeKind.LINE || kind == ShapeKind.ARROW
+}
 
 enum class FieldType { TEXT, CHECKBOX, RADIO, CHOICE, SIGNATURE }
 
