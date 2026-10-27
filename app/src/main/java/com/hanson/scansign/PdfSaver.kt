@@ -39,7 +39,7 @@ object PdfSaver {
                         when (item) {
                             is SignatureItem -> {
                                 val img = images.getOrPut(item.file.absolutePath) { loadImage(doc, item.file) }
-                                cs.drawImage(img, boxMatrix(g, item.fx, item.fy, item.fw, item.fh))
+                                cs.drawImage(img, boxMatrix(g, item.fx, item.fy, item.fw, item.fh, item.rotation))
                             }
                             is TextItem -> drawText(doc, cs, g, item)
                             is InkItem -> drawInk(cs, g, item)
@@ -208,15 +208,30 @@ object PdfSaver {
     }
 
     /** Matrix that maps the unit square onto a box given in displayed-page fractions. */
-    private fun boxMatrix(g: PageGeom, fx: Float, fy: Float, fw: Float, fh: Float): Matrix {
+    private fun boxMatrix(g: PageGeom, fx: Float, fy: Float, fw: Float, fh: Float, rotation: Float = 0f): Matrix {
         val u0 = fx * g.dispW
         val v0 = fy * g.dispH
         val w = fw * g.dispW
         val h = fh * g.dispH
-        val o = g.toUser(u0, v0 + h)
-        val sx = g.toUser(u0 + w, v0 + h)
-        val ty = g.toUser(u0, v0)
+        val map = rotated(g, u0 + w / 2, v0 + h / 2, rotation)
+        val o = map(u0, v0 + h)
+        val sx = map(u0 + w, v0 + h)
+        val ty = map(u0, v0)
         return Matrix(sx.x - o.x, sx.y - o.y, ty.x - o.x, ty.y - o.y, o.x, o.y)
+    }
+
+    /**
+     * Displayed point -> PDF user space, after rotating clockwise by [deg] around (cu, cv) in displayed points
+     * (the same rotation the screen preview applies).
+     */
+    private fun rotated(g: PageGeom, cu: Float, cv: Float, deg: Float): (Float, Float) -> PointF {
+        if (deg == 0f) return { u, v -> g.toUser(u, v) }
+        val a = Math.toRadians(deg.toDouble())
+        val c = kotlin.math.cos(a).toFloat(); val sn = kotlin.math.sin(a).toFloat()
+        return { u, v ->
+            val du = u - cu; val dv = v - cv
+            g.toUser(cu + du * c - dv * sn, cv + du * sn + dv * c)
+        }
     }
 
     private fun pdfFont(item: TextItem): PDFont = when (item.font) {
@@ -245,6 +260,8 @@ object PdfSaver {
         val size = item.sizePt
         var left = item.fx * g.dispW
         var top = item.fy * g.dispH
+        val (boxW, boxH) = TextRender.sizePt(item)
+        val T = rotated(g, left + boxW / 2, top + boxH / 2, item.rotation)
         if (item.boxed) {
             val (wPt, hPt) = TextRender.sizePt(item)
             val lw = TextRender.FRAME * size
@@ -254,8 +271,8 @@ object PdfSaver {
             cs.setLineWidth(lw)
             cs.setLineJoinStyle(1)
             val pts = listOf(
-                g.toUser(left + half, top + half), g.toUser(left + wPt - half, top + half),
-                g.toUser(left + wPt - half, top + hPt - half), g.toUser(left + half, top + hPt - half)
+                T(left + half, top + half), T(left + wPt - half, top + half),
+                T(left + wPt - half, top + hPt - half), T(left + half, top + hPt - half)
             )
             cs.moveTo(pts[0].x, pts[0].y)
             for (i in 1..3) cs.lineTo(pts[i].x, pts[i].y)
@@ -268,9 +285,9 @@ object PdfSaver {
         lines.forEachIndexed { k, line ->
             if (line.isEmpty()) return@forEachIndexed
             val baseV = top + size * (TextRender.ASCENT + TextRender.LINE * k)
-            val o = g.toUser(left, baseV)
-            val ux = g.toUser(left + 1f, baseV)
-            val up = g.toUser(left, baseV - 1f)
+            val o = T(left, baseV)
+            val ux = T(left + 1f, baseV)
+            val up = T(left, baseV - 1f)
             cs.beginText()
             cs.setFont(font, size)
             cs.setNonStrokingColor(r, gr, b)
@@ -289,6 +306,6 @@ object PdfSaver {
         TextRender.draw(Canvas(bmp), item, 0f, 0f, scale)
         val img = LosslessFactory.createFromImage(doc, bmp)
         bmp.recycle()
-        cs.drawImage(img, boxMatrix(g, item.fx, item.fy, wPt / g.dispW, hPt / g.dispH))
+        cs.drawImage(img, boxMatrix(g, item.fx, item.fy, wPt / g.dispW, hPt / g.dispH, item.rotation))
     }
 }

@@ -50,6 +50,137 @@ class PdfDocView @JvmOverloads constructor(
         fun onAnyTap() {}
         /** A pen stroke or shape was just drawn. */
         fun onItemAdded(item: EditItem) {}
+        /** Long-press needs the words on [page] (call [setPageWords] when ready). */
+        fun onNeedPageText(page: Int) {}
+        /** Text selection changed; null = cleared. [anchor] is the selection's screen bounds. */
+        fun onTextSelected(text: String?, anchor: RectF?) {}
+    }
+
+    /** A recognised word: text and position as page fractions; [lineEnd] = last word of a line. */
+    class Word(val text: String, val r: RectF, val lineEnd: Boolean)
+
+    private val pageWords = HashMap<Int, List<Word>>()
+    private var selPage = -1
+    private var selA = -1
+    private var selB = -1
+    private var pendingSel: Pair<Int, PointF>? = null
+    private val selFill = Paint().apply { color = Color.argb(70, 36, 87, 245) }
+    private val selHandle = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(36, 87, 245) }
+
+    fun hasPageWords(page: Int) = pageWords.containsKey(page)
+
+    fun setPageWords(page: Int, words: List<Word>) {
+        pageWords[page] = words
+        val p = pendingSel
+        if (p != null && p.first == page) {
+            pendingSel = null
+            if (words.isEmpty()) listener?.onTextSelected("", null) else selectWordAt(page, p.second)
+        }
+    }
+
+    fun clearTextSelection() {
+        if (selPage < 0 && pendingSel == null) return
+        selPage = -1; selA = -1; selB = -1; pendingSel = null
+        listener?.onTextSelected(null, null)
+        invalidate()
+    }
+
+    /** Selects every word on the page that holds the current selection. */
+    fun selectAllText() {
+        val words = pageWords[selPage] ?: return
+        if (words.isEmpty()) return
+        selA = 0; selB = words.size - 1
+        notifySelection()
+        invalidate()
+    }
+
+    private fun startTextSelection(x: Float, y: Float) {
+        val page = pageAt(x, y) ?: return
+        val f = toFrac(page, x, y)
+        select(null)
+        if (pageWords.containsKey(page)) selectWordAt(page, f)
+        else {
+            pendingSel = Pair(page, f)
+            listener?.onNeedPageText(page)
+        }
+    }
+
+    private fun nearestWord(page: Int, f: PointF): Int {
+        val words = pageWords[page] ?: return -1
+        var best = -1
+        var bestD = Float.MAX_VALUE
+        val g = geoms[page]
+        for ((i, w) in words.withIndex()) {
+            // distance in points, vertical distance weighted more (stay on the line)
+            val dx = when { f.x < w.r.left -> w.r.left - f.x; f.x > w.r.right -> f.x - w.r.right; else -> 0f } * g.dispW
+            val dy = when { f.y < w.r.top -> w.r.top - f.y; f.y > w.r.bottom -> f.y - w.r.bottom; else -> 0f } * g.dispH
+            val d = dx + dy * 3
+            if (d < bestD) { bestD = d; best = i }
+        }
+        return best
+    }
+
+    private fun selectWordAt(page: Int, f: PointF) {
+        val i = nearestWord(page, f)
+        if (i < 0) { listener?.onTextSelected("", null); return }
+        selPage = page; selA = i; selB = i
+        notifySelection()
+        invalidate()
+    }
+
+    private fun selRange(): IntRange? = if (selPage < 0 || selA < 0) null else minOf(selA, selB)..maxOf(selA, selB)
+
+    private fun wordScreen(page: Int, w: Word): RectF {
+        val pr = pageScreenRect(page)
+        return RectF(pr.left + w.r.left * pr.width(), pr.top + w.r.top * pr.height(),
+            pr.left + w.r.right * pr.width(), pr.top + w.r.bottom * pr.height())
+    }
+
+    private fun selectionHandles(): Pair<PointF, PointF>? {
+        val range = selRange() ?: return null
+        val words = pageWords[selPage] ?: return null
+        val a = wordScreen(selPage, words[range.first]); val b = wordScreen(selPage, words[range.last])
+        return Pair(PointF(a.left, a.bottom + 10 * density), PointF(b.right, b.bottom + 10 * density))
+    }
+
+    fun selectionScreenRect(): RectF? {
+        val range = selRange() ?: return null
+        val words = pageWords[selPage] ?: return null
+        val r = RectF(wordScreen(selPage, words[range.first]))
+        for (i in range) r.union(wordScreen(selPage, words[i]))
+        return r
+    }
+
+    private fun selectedText(): String {
+        val range = selRange() ?: return ""
+        val words = pageWords[selPage] ?: return ""
+        val sb = StringBuilder()
+        for (i in range) {
+            sb.append(words[i].text)
+            if (i != range.last) sb.append(if (words[i].lineEnd) "\n" else " ")
+        }
+        return sb.toString()
+    }
+
+    private fun notifySelection() = listener?.onTextSelected(selectedText(), selectionScreenRect())
+
+    private fun dragSelectionHandle(x: Float, y: Float) {
+        if (selPage < 0) return
+        val i = nearestWord(selPage, toFrac(selPage, x, y - 10 * density))
+        if (i < 0) return
+        if (mode == Mode.SEL_START) selA = i else selB = i
+        invalidate()
+    }
+
+    private fun drawTextSelection(canvas: Canvas) {
+        val range = selRange() ?: return
+        val words = pageWords[selPage] ?: return
+        for (i in range) canvas.drawRect(wordScreen(selPage, words[i]), selFill)
+        val (a, b) = selectionHandles() ?: return
+        for (p in listOf(a, b)) {
+            canvas.drawLine(p.x, p.y - 10 * density, p.x, p.y, selHandle.apply { strokeWidth = 2 * density })
+            canvas.drawCircle(p.x, p.y + 4 * density, 8 * density, selHandle)
+        }
     }
 
     /** Current drawing tool. [None] = select / move / pan. */
@@ -159,7 +290,7 @@ class PdfDocView @JvmOverloads constructor(
     private val handleR = 12 * density
 
     // ---- gestures ----
-    private enum class Mode { NONE, PAN, ITEM_MOVE, ITEM_RESIZE, SCROLLBAR, DRAW }
+    private enum class Mode { NONE, PAN, ITEM_MOVE, ITEM_RESIZE, ITEM_ROTATE, SCROLLBAR, DRAW, SEL_START, SEL_END }
     private var mode = Mode.NONE
     private var lastX = 0f
     private var lastY = 0f
@@ -201,6 +332,13 @@ class PdfDocView @JvmOverloads constructor(
         override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
             if (tool == Tool.None) handleTap(e.x, e.y)
             return true
+        }
+
+        override fun onLongPress(e: MotionEvent) {
+            if (tool != Tool.None || mode != Mode.PAN) return
+            // long-press on an item selects it; elsewhere it starts text selection
+            if (items.asReversed().any { hits(it, e.x, e.y) }) return
+            startTextSelection(e.x, e.y)
         }
 
         override fun onDoubleTap(e: MotionEvent): Boolean {
@@ -440,6 +578,7 @@ class PdfDocView @JvmOverloads constructor(
         tiles.keys.retainAll { it in range }
 
         drawSelection(canvas)
+        drawTextSelection(canvas)
         drawScrollbar(canvas)
 
         val center = pageAtDocY((scrollYf + height / 2f) / zoom)
@@ -571,9 +710,12 @@ class PdfDocView @JvmOverloads constructor(
     }
 
     /** Precise hit test: thin items (pen strokes, lines) only respond near the stroke. */
-    private fun hits(item: EditItem, x: Float, y: Float): Boolean {
+    private fun hits(item: EditItem, xIn: Float, yIn: Float, extra: Float = 0f): Boolean {
         val r = itemRect(item) ?: return false
-        val slop = 14 * density
+        // undo the item's rotation so we can test against its unrotated box
+        val local = rot(xIn, yIn, r.centerX(), r.centerY(), -item.rotationDeg)
+        val x = local.x; val y = local.y
+        val slop = 14 * density + extra
         val grow = RectF(r)
         grow.inset(-slop / 2, -slop / 2)
         if (!grow.contains(x, y)) return false
@@ -594,24 +736,61 @@ class PdfDocView @JvmOverloads constructor(
         }
     }
 
-    private fun drawSelection(canvas: Canvas) {
-        val s = selected ?: return
-        val r = itemRect(s) ?: return
+    /** Rotates screen point (x, y) around (cx, cy) by [deg] clockwise. */
+    private fun rot(x: Float, y: Float, cx: Float, cy: Float, deg: Float): PointF {
+        if (deg == 0f) return PointF(x, y)
+        val a = Math.toRadians(deg.toDouble())
+        val c = kotlin.math.cos(a).toFloat(); val sn = kotlin.math.sin(a).toFloat()
+        val dx = x - cx; val dy = y - cy
+        return PointF(cx + dx * c - dy * sn, cy + dx * sn + dy * c)
+    }
+
+    /** Positions of the selection handles (delete, resize, rotate) for the selected item. */
+    private class Handles(val box: RectF, val deg: Float, val del: PointF, val resize: PointF, val rotate: PointF?, val stemFrom: PointF?)
+
+    private fun handles(s: EditItem): Handles? {
+        val r = itemRect(s) ?: return null
         val pad = 3 * density
         val box = RectF(r.left - pad, r.top - pad, r.right + pad, r.bottom + pad)
-        canvas.drawRect(box, selBorder)
-        // delete (top-right)
-        canvas.drawCircle(box.right, box.top, handleR, delPaint)
-        canvas.drawCircle(box.right, box.top, handleR, handleRing)
+        val deg = s.rotationDeg
+        val cx = box.centerX(); val cy = box.centerY()
+        val del = rot(box.right, box.top, cx, cy, deg)
+        val res = rot(box.right, box.bottom, cx, cy, deg)
+        val rotH = if (s.canRotate) rot(cx, box.top - 34 * density, cx, cy, deg) else null
+        val stem = if (s.canRotate) rot(cx, box.top, cx, cy, deg) else null
+        return Handles(box, deg, del, res, rotH, stem)
+    }
+
+    private fun drawSelection(canvas: Canvas) {
+        val s = selected ?: return
+        val h = handles(s) ?: return
+        canvas.save()
+        canvas.rotate(h.deg, h.box.centerX(), h.box.centerY())
+        canvas.drawRect(h.box, selBorder)
+        canvas.restore()
         val k = handleR * 0.38f
-        canvas.drawLine(box.right - k, box.top - k, box.right + k, box.top + k, handleIcon)
-        canvas.drawLine(box.right - k, box.top + k, box.right + k, box.top - k, handleIcon)
-        // resize (bottom-right)
-        canvas.drawCircle(box.right, box.bottom, handleR, resizePaint)
-        canvas.drawCircle(box.right, box.bottom, handleR, handleRing)
-        canvas.drawLine(box.right - k, box.bottom + k, box.right + k, box.bottom - k, handleIcon)
-        canvas.drawLine(box.right + k, box.bottom - k, box.right + k - k * 0.9f, box.bottom - k, handleIcon)
-        canvas.drawLine(box.right + k, box.bottom - k, box.right + k, box.bottom - k + k * 0.9f, handleIcon)
+        // rotate handle with stem
+        if (h.rotate != null && h.stemFrom != null) {
+            canvas.drawLine(h.stemFrom.x, h.stemFrom.y, h.rotate.x, h.rotate.y, selBorder)
+            canvas.drawCircle(h.rotate.x, h.rotate.y, handleR, resizePaint)
+            canvas.drawCircle(h.rotate.x, h.rotate.y, handleR, handleRing)
+            val arc = RectF(h.rotate.x - k * 1.3f, h.rotate.y - k * 1.3f, h.rotate.x + k * 1.3f, h.rotate.y + k * 1.3f)
+            canvas.drawArc(arc, -60f, 270f, false, handleIcon)
+        }
+        // delete
+        canvas.drawCircle(h.del.x, h.del.y, handleR, delPaint)
+        canvas.drawCircle(h.del.x, h.del.y, handleR, handleRing)
+        canvas.drawLine(h.del.x - k, h.del.y - k, h.del.x + k, h.del.y + k, handleIcon)
+        canvas.drawLine(h.del.x - k, h.del.y + k, h.del.x + k, h.del.y - k, handleIcon)
+        // resize
+        canvas.drawCircle(h.resize.x, h.resize.y, handleR, resizePaint)
+        canvas.drawCircle(h.resize.x, h.resize.y, handleR, handleRing)
+        canvas.drawLine(h.resize.x - k, h.resize.y + k, h.resize.x + k, h.resize.y - k, handleIcon)
+        if (mode == Mode.ITEM_ROTATE) {
+            val label = "${s.rotationDeg.roundToInt()}°"
+            canvas.drawText(label, h.box.centerX(), h.box.centerY() + bubbleText.textSize * 0.35f, bubbleText.apply { color = Color.rgb(36, 87, 245) })
+            bubbleText.color = Color.WHITE
+        }
     }
 
     private fun sigBitmap(item: SignatureItem): Bitmap? {
@@ -699,18 +878,24 @@ class PdfDocView @JvmOverloads constructor(
                     scrollTo(scrollXf, t * maxScrollY())
                 }
             }
-            Mode.ITEM_MOVE, Mode.ITEM_RESIZE -> {
+            Mode.ITEM_MOVE, Mode.ITEM_RESIZE, Mode.ITEM_ROTATE -> {
                 if (e.actionMasked == MotionEvent.ACTION_MOVE && e.pointerCount == 1 && !scaleDetector.isInProgress) {
                     dragSelected(e.x - lastX, e.y - lastY)
+                } else if (e.actionMasked == MotionEvent.ACTION_MOVE && e.pointerCount >= 2) {
+                    twist(e)
                 }
+                if (e.actionMasked == MotionEvent.ACTION_POINTER_UP) twistAngle = Float.NaN
             }
+            Mode.SEL_START, Mode.SEL_END -> if (e.actionMasked == MotionEvent.ACTION_MOVE) dragSelectionHandle(e.x, e.y)
             Mode.DRAW -> if (e.actionMasked == MotionEvent.ACTION_MOVE) continueDrawing(e)
             Mode.PAN, Mode.NONE -> {}
         }
         lastX = e.x; lastY = e.y
 
         if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) {
-            if (mode == Mode.ITEM_MOVE || mode == Mode.ITEM_RESIZE) listener?.onItemsChanged()
+            if (mode == Mode.ITEM_MOVE || mode == Mode.ITEM_RESIZE || mode == Mode.ITEM_ROTATE) listener?.onItemsChanged()
+            twistAngle = Float.NaN
+            if (mode == Mode.SEL_START || mode == Mode.SEL_END) notifySelection()
             if (mode == Mode.DRAW) finishDrawing()
             if (mode == Mode.SCROLLBAR) scrollbarVisibleUntil = System.currentTimeMillis() + 1200
             mode = Mode.NONE
@@ -724,22 +909,26 @@ class PdfDocView @JvmOverloads constructor(
             val t = thumbTop()
             if (y > t - 24 * density && y < t + thumbH + 24 * density) return Mode.SCROLLBAR
         }
+        if (selPage >= 0) {
+            val (ha, hb) = selectionHandles() ?: Pair(null, null)
+            val hit = 26 * density
+            if (ha != null && hypot(x - ha.x, y - ha.y) < hit) return Mode.SEL_START
+            if (hb != null && hypot(x - hb.x, y - hb.y) < hit) return Mode.SEL_END
+        }
         val s = selected
         if (s != null) {
-            val r = itemRect(s)
-            if (r != null) {
-                val pad = 3 * density
+            val h = handles(s)
+            if (h != null) {
                 val hit = handleR * 1.9f
-                if (hypot(x - (r.right + pad), y - (r.top - pad)) < hit) {
+                if (hypot(x - h.del.x, y - h.del.y) < hit) {
                     items.remove(s)
                     select(null)
                     listener?.onItemsChanged()
                     return Mode.NONE
                 }
-                if (hypot(x - (r.right + pad), y - (r.bottom + pad)) < hit) return Mode.ITEM_RESIZE
-                val grow = RectF(r)
-                grow.inset(-10 * density, -10 * density)
-                if (grow.contains(x, y)) return Mode.ITEM_MOVE
+                if (h.rotate != null && hypot(x - h.rotate.x, y - h.rotate.y) < hit) return Mode.ITEM_ROTATE
+                if (hypot(x - h.resize.x, y - h.resize.y) < hit) return Mode.ITEM_RESIZE
+                if (hits(s, x, y, extra = 10 * density)) return Mode.ITEM_MOVE
             }
         }
         return Mode.PAN
@@ -760,8 +949,15 @@ class PdfDocView @JvmOverloads constructor(
             }
             Mode.ITEM_RESIZE -> {
                 val r = itemRect(s) ?: return
-                val newW = (r.width() + dx).coerceAtLeast(16 * density)
-                scaleItem(s, newW / r.width())
+                val cx = r.centerX(); val cy = r.centerY()
+                val before = hypot(lastX - cx, lastY - cy)
+                val after = hypot(lastX + dx - cx, lastY + dy - cy)
+                if (before > 4 * density) scaleItem(s, (after / before).coerceIn(0.8f, 1.25f))
+            }
+            Mode.ITEM_ROTATE -> {
+                val r = itemRect(s) ?: return
+                val ang = Math.toDegrees(kotlin.math.atan2((lastY + dy - r.centerY()).toDouble(), (lastX + dx - r.centerX()).toDouble())).toFloat() + 90f
+                s.rotationDeg = snap(ang)
             }
             else -> {}
         }
@@ -769,8 +965,39 @@ class PdfDocView @JvmOverloads constructor(
     }
 
     private fun scaleItem(s: EditItem, factor: Float) {
+        // keep the centre in place so rotated items don't drift
+        val before = itemRect(s)
         ItemRender.scaleBy(s, factor)
+        val after = itemRect(s)
+        if (before != null && after != null && (s is SignatureItem || s is TextItem)) {
+            val pr = pageScreenRect(s.page)
+            ItemRender.moveBy(s, (before.centerX() - after.centerX()) / pr.width(), (before.centerY() - after.centerY()) / pr.height())
+        }
         invalidate()
+    }
+
+    /** Snaps to 0 / 90 / 180 / 270 when within 6 degrees. */
+    private fun snap(deg: Float): Float {
+        val n = ((deg % 360f) + 360f) % 360f
+        for (t in floatArrayOf(0f, 90f, 180f, 270f, 360f)) if (kotlin.math.abs(n - t) < 6f) return t % 360f
+        return n
+    }
+
+    // two-finger twist on a selected item
+    private var twistAngle = Float.NaN
+
+    private fun twist(e: MotionEvent) {
+        val s = selected ?: return
+        if (!s.canRotate || e.pointerCount < 2) { twistAngle = Float.NaN; return }
+        val a = Math.toDegrees(kotlin.math.atan2((e.getY(1) - e.getY(0)).toDouble(), (e.getX(1) - e.getX(0)).toDouble())).toFloat()
+        if (!twistAngle.isNaN()) {
+            var d = a - twistAngle
+            if (d > 180) d -= 360
+            if (d < -180) d += 360
+            s.rotationDeg = s.rotationDeg + d
+            invalidate()
+        }
+        twistAngle = a
     }
 
     // ---- drawing tools ----
@@ -841,6 +1068,7 @@ class PdfDocView @JvmOverloads constructor(
 
     private fun handleTap(x: Float, y: Float) {
         listener?.onAnyTap()
+        if (selPage >= 0 || pendingSel != null) { clearTextSelection(); return }
         // items first (topmost last in list)
         for (item in items.asReversed()) {
             if (hits(item, x, y)) {

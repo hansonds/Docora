@@ -138,6 +138,19 @@ class PdfEditorActivity : AppCompatActivity(), PdfDocView.Listener {
         findViewById<MaterialButton>(R.id.btnZoomIn).setOnClickListener { doc.zoomIn() }
         findViewById<MaterialButton>(R.id.btnZoomOut).setOnClickListener { doc.zoomOut() }
         pagePill.setOnClickListener { goToPageDialog() }
+        textBar = findViewById(R.id.textBar)
+        findViewById<MaterialButton>(R.id.selCopy).setOnClickListener {
+            (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                .setPrimaryClip(android.content.ClipData.newPlainText("text", selText))
+            Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
+            doc.clearTextSelection()
+        }
+        findViewById<MaterialButton>(R.id.selAll).setOnClickListener { doc.selectAllText() }
+        findViewById<MaterialButton>(R.id.selShare).setOnClickListener {
+            startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"; putExtra(Intent.EXTRA_TEXT, selText)
+            }, "Share text"))
+        }
         setupToolbarMenu()
         setupTools()
 
@@ -257,7 +270,69 @@ class PdfEditorActivity : AppCompatActivity(), PdfDocView.Listener {
 
     override fun onSelectionChanged(item: EditItem?) {}
 
-    override fun onViewportChanged() = positionEditor()
+    override fun onViewportChanged() {
+        positionEditor()
+        positionTextBar()
+    }
+
+    // ---------------- selecting text on the page ----------------
+
+    private lateinit var textBar: View
+    private var selText = ""
+    private val textJobs = HashSet<Int>()
+
+    override fun onNeedPageText(page: Int) {
+        val r = renderer ?: return
+        if (!textJobs.add(page)) return
+        Toast.makeText(this, "Finding text on this page…", Toast.LENGTH_SHORT).show()
+        r.renderPage(page, 2200, stillWanted = { true }) { bmp ->
+            if (bmp == null) { textJobs.remove(page); doc.setPageWords(page, emptyList()); return@renderPage }
+            lifecycleScope.launch {
+                val words = withContext(Dispatchers.IO) {
+                    try {
+                        Ocr.words(this@PdfEditorActivity, bmp).map { w ->
+                            PdfDocView.Word(w.text, android.graphics.RectF(
+                                w.box.left.toFloat() / bmp.width, w.box.top.toFloat() / bmp.height,
+                                w.box.right.toFloat() / bmp.width, w.box.bottom.toFloat() / bmp.height
+                            ), w.lineEnd)
+                        }
+                    } catch (e: Throwable) { emptyList() }
+                }
+                bmp.recycle()
+                textJobs.remove(page)
+                doc.setPageWords(page, words)
+            }
+        }
+    }
+
+    override fun onTextSelected(text: String?, anchor: android.graphics.RectF?) {
+        if (text == null) { textBar.visibility = View.GONE; return }
+        if (text.isEmpty() || anchor == null) {
+            textBar.visibility = View.GONE
+            Toast.makeText(this, "No text found here", Toast.LENGTH_SHORT).show()
+            return
+        }
+        selText = text
+        textBar.visibility = View.VISIBLE
+        hintOnce("sel_hint", "Drag the blue handles to select more")
+        textBar.post { positionTextBar() }
+    }
+
+    private fun positionTextBar() {
+        if (textBar.visibility != View.VISIBLE) return
+        val r = doc.selectionScreenRect() ?: return
+        val d = resources.displayMetrics.density
+        val w = textBar.width.takeIf { it > 0 } ?: (260 * d).toInt()
+        val h = textBar.height.takeIf { it > 0 } ?: (44 * d).toInt()
+        var top = r.top - h - 14 * d
+        if (top < 8 * d) top = r.bottom + 28 * d
+        val left = (r.centerX() - w / 2).coerceIn(8 * d, (doc.width - w - 8 * d).coerceAtLeast(8 * d))
+        val lp = textBar.layoutParams as FrameLayout.LayoutParams
+        lp.gravity = android.view.Gravity.TOP or android.view.Gravity.START
+        lp.leftMargin = left.toInt()
+        lp.topMargin = top.toInt().coerceIn(0, (doc.height - h).coerceAtLeast(0))
+        textBar.layoutParams = lp
+    }
 
     override fun onAnyTap() {
         if (editingWidget != null) commitEdit()
