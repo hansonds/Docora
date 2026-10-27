@@ -1,16 +1,26 @@
 # PDF ScanSign
 
-Android app to scan documents and sign PDFs.
+Android app to scan documents, sign PDFs and fill PDF forms. By Hanson · [phoenicx.org](https://phoenicx.org)
 
-- **Scan** with your phone's camera app or pick photos from the gallery (many at once)
-- **Auto edge detection** finds the page corners; drag corners or edges to fix them by hand (with a magnifier)
-- **Perspective correction** straightens the page
-- **Filters:** Original, Magic color (removes shadows), Grayscale, Black & white
-- **Make a PDF** from all pages: reorder, rotate, re-crop or delete pages first; A4 / Letter / fit-to-image, three quality levels
-- **Signatures:** photograph a signature on paper (or pick a photo); the paper background is removed automatically, with sliders for removal strength and ink thickness and a choice of original / black / blue ink
-- **Sign any PDF:** place one or more signatures on any page, drag to move, pinch or drag the blue dot to resize, red × to remove
-- Opens PDFs shared from other apps; saved PDFs also go to **Downloads › PDF ScanSign**
-- Works fully offline, no ads, no accounts
+**Scanning**
+- In-app camera with live page edge detection and auto capture (hold steady), torch, page-by-page loop
+- Import from photos (many at once)
+- Manual corner/edge adjustment with magnifier; perspective correction
+- Filters: Magic color (removes shadows), Original, Grayscale, Black & white
+- Multi-page PDF: reorder, rotate, re-crop, delete; A4 / Letter / fit; 3 quality levels
+
+**PDF editor** (any PDF: large 1000+ page files, password-protected, damaged files repaired)
+- Smooth continuous scrolling, pinch / double-tap / button zoom with sharp re-rendering
+- Fast-scroll handle and Go-to-page for long documents
+- Fill PDF forms: text, checkboxes, radio buttons, dropdowns, signature fields; option to lock (flatten)
+- Add signatures anywhere (drag, pinch or handle to resize, × to remove)
+- Add text with font, size, colour and bold; "insert today's date"; works with any language
+
+**Signatures**
+- Photograph a signature on white paper (in-app camera with 4:3 guide) or pick a photo
+- Fixed 4:3 crop, automatic background removal, ink thickness and colour (original / black / blue)
+
+Saved PDFs appear in the app and in **Downloads › PDF ScanSign**. Works offline, no ads, no account.
 
 ## Building (GitHub does it for you)
 

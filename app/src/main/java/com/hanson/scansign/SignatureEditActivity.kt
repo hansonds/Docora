@@ -69,6 +69,7 @@ class SignatureEditActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_signature_edit)
+        setSupportActionBar(findViewById(R.id.toolbar))
         title = "Clean up signature"
         preview = findViewById(R.id.preview)
         progress = findViewById(R.id.progress)

@@ -48,13 +48,29 @@ object Scanner {
             Bitmap.createScaledBitmap(bmp, (bmp.width * scale).roundToInt(), (bmp.height * scale).roundToInt(), true)
         } else bmp
         val ratio = if (scale < 1.0) 1.0 / scale else 1.0
-
         val rgba = Mat()
-        Utils.bitmapToMat(small, rgba)
         val gray = Mat()
-        Imgproc.cvtColor(rgba, gray, Imgproc.COLOR_RGBA2GRAY)
-        val imgArea = gray.rows().toDouble() * gray.cols()
+        try {
+            Utils.bitmapToMat(small, rgba)
+            Imgproc.cvtColor(rgba, gray, Imgproc.COLOR_RGBA2GRAY)
+            val found = detectGray(gray) ?: return null
+            return orderPoints(found.map { PointF((it.x * ratio).toFloat(), (it.y * ratio).toFloat()) })
+                .map { PointF(it.x.coerceIn(0f, bmp.width.toFloat()), it.y.coerceIn(0f, bmp.height.toFloat())) }
+        } catch (e: Throwable) {
+            return null
+        } finally {
+            rgba.release(); gray.release()
+            if (small != bmp) small.recycle()
+        }
+    }
 
+    /**
+     * Core detector on a grayscale image (ideally 400-800 px on the long side).
+     * Returns corners in [gray] pixel coordinates, ordered TL, TR, BR, BL.
+     */
+    fun detectGray(gray: Mat): List<PointF>? {
+        if (!App.openCvReady) return null
+        val imgArea = gray.rows().toDouble() * gray.cols()
         val edgeMaps = ArrayList<Mat>()
         try {
             // 1) soft Canny
@@ -76,7 +92,7 @@ object Scanner {
             )
             edgeMaps.add(e2)
 
-            // 3) brightness threshold (white paper on a darker table)
+            // 3) brightness threshold (white paper on a darker table) - fallback only
             val b3 = Mat()
             Imgproc.GaussianBlur(gray, b3, Size(7.0, 7.0), 0.0)
             val t3 = Mat()
@@ -90,7 +106,6 @@ object Scanner {
 
             var best: Array<Point>? = null
             var bestArea = 0.0
-            // edge-based maps are the most reliable; the brightness map is only a fallback
             for (edges in edgeMaps.take(2)) {
                 val quad = largestQuad(edges, imgArea) ?: continue
                 val area = abs(Imgproc.contourArea(MatOfPoint(*quad)))
@@ -103,14 +118,11 @@ object Scanner {
             }
             if (best == null) best = largestQuad(edgeMaps[2], imgArea)
             val found = best ?: return null
-            return orderPoints(found.map { PointF((it.x * ratio).toFloat(), (it.y * ratio).toFloat()) })
-                .map { PointF(it.x.coerceIn(0f, bmp.width.toFloat()), it.y.coerceIn(0f, bmp.height.toFloat())) }
-        } catch (e: Exception) {
+            return orderPoints(found.map { PointF(it.x.toFloat(), it.y.toFloat()) })
+        } catch (e: Throwable) {
             return null
         } finally {
-            rgba.release(); gray.release()
             edgeMaps.forEach { it.release() }
-            if (small != bmp) small.recycle()
         }
     }
 

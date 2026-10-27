@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.PointF
 import android.os.Bundle
 import android.view.View
 import android.widget.ImageView
@@ -13,6 +14,7 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
@@ -21,10 +23,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.math.max
+import kotlin.math.roundToInt
 
 /**
- * Step 1: adjust the crop (auto-detected or manual).
- * Step 2 (documents only): pick a filter, then save the page.
+ * Documents: adjust the 4 corners (auto-detected), then pick a filter and save the page.
+ * Signatures: fixed 4:3 rectangle crop.
  * Returns the output image path in [EXTRA_OUT].
  */
 class CropActivity : AppCompatActivity() {
@@ -33,18 +36,23 @@ class CropActivity : AppCompatActivity() {
         const val EXTRA_SRC = "src"
         const val EXTRA_MODE = "mode"
         const val EXTRA_OUT = "out"
+        const val EXTRA_HINT = "hint"
         const val MODE_DOC = "doc"
         const val MODE_SIG = "sig"
         private const val PREFS = "scan"
         private const val KEY_FILTER = "filter"
 
-        fun intent(ctx: Context, src: File, mode: String) =
+        /** [hint] = live-camera corners as fractions (x0,y0,...,x3,y3), used if detection on the photo fails. */
+        fun intent(ctx: Context, src: File, mode: String, hint: FloatArray? = null) =
             Intent(ctx, CropActivity::class.java)
                 .putExtra(EXTRA_SRC, src.absolutePath)
                 .putExtra(EXTRA_MODE, mode)
+                .putExtra(EXTRA_HINT, hint)
     }
 
+    private lateinit var toolbar: MaterialToolbar
     private lateinit var cropView: QuadCropView
+    private lateinit var ratioView: RatioCropView
     private lateinit var preview: ImageView
     private lateinit var progress: ProgressBar
     private lateinit var hint: TextView
@@ -57,7 +65,7 @@ class CropActivity : AppCompatActivity() {
     private var source: Bitmap? = null
     private var warped: Bitmap? = null
     private var warpedSmall: Bitmap? = null
-    private var filter = ScanFilter.ORIGINAL
+    private var filter = ScanFilter.MAGIC
     private var mode = MODE_DOC
     private var inFilterStep = false
     private var busy = false
@@ -65,7 +73,9 @@ class CropActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_crop)
+        toolbar = findViewById(R.id.toolbar)
         cropView = findViewById(R.id.cropView)
+        ratioView = findViewById(R.id.ratioView)
         preview = findViewById(R.id.preview)
         progress = findViewById(R.id.progress)
         hint = findViewById(R.id.hint)
@@ -76,22 +86,23 @@ class CropActivity : AppCompatActivity() {
         btnNext = findViewById(R.id.btnNext)
 
         mode = intent.getStringExtra(EXTRA_MODE) ?: MODE_DOC
-        title = if (mode == MODE_SIG) "Crop signature" else "Adjust corners"
         filter = runCatching {
-            ScanFilter.valueOf(getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_FILTER, "ORIGINAL")!!)
-        }.getOrDefault(ScanFilter.ORIGINAL)
+            ScanFilter.valueOf(getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_FILTER, ScanFilter.MAGIC.name)!!)
+        }.getOrDefault(ScanFilter.MAGIC)
 
-        hint.text = if (mode == MODE_SIG)
-            "Drag the corners tightly around the signature"
-        else
-            "Drag corners or edges to fit the page. A magnifier helps you place them."
-        btnNext.text = if (mode == MODE_SIG) "Next" else "Crop"
-
+        toolbar.setNavigationOnClickListener { goBack() }
+        val isSig = mode == MODE_SIG
+        cropView.visibility = if (isSig) View.GONE else View.VISIBLE
+        ratioView.visibility = if (isSig) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.btnAuto).visibility = if (isSig) View.GONE else View.VISIBLE
+        findViewById<MaterialButton>(R.id.btnFull).text = if (isSig) "Reset" else "Full image"
+        showFilterStep(false)
         setupFilters()
 
-        findViewById<MaterialButton>(R.id.btnAuto).setOnClickListener { autoDetect(showToast = true) }
+        findViewById<MaterialButton>(R.id.btnAuto).setOnClickListener { autoDetect() }
         findViewById<MaterialButton>(R.id.btnFull).setOnClickListener {
-            source?.let { cropView.setQuad(Scanner.fullQuad(it.width, it.height)) }
+            val b = source ?: return@setOnClickListener
+            if (isSig) ratioView.resetCrop() else cropView.setQuad(Scanner.fullQuad(b.width, b.height))
         }
         findViewById<MaterialButton>(R.id.btnRotate).setOnClickListener { rotate() }
         btnBack.setOnClickListener { goBack() }
@@ -102,6 +113,7 @@ class CropActivity : AppCompatActivity() {
 
         val path = intent.getStringExtra(EXTRA_SRC)
         if (path == null) { finish(); return }
+        val hintQuad = intent.getFloatArrayExtra(EXTRA_HINT)
         setBusy(true)
         lifecycleScope.launch {
             val bmp = withContext(Dispatchers.IO) { ImageUtils.load(File(path)) }
@@ -111,10 +123,16 @@ class CropActivity : AppCompatActivity() {
                 return@launch
             }
             source = bmp
-            val quad = withContext(Dispatchers.Default) { Scanner.detect(bmp) }
-            cropView.setImage(bmp, quad ?: Scanner.defaultQuad(bmp.width, bmp.height))
-            if (quad == null && mode == MODE_DOC) {
-                hint.text = "Page edges not found automatically — drag the corners to fit"
+            if (isSig) {
+                ratioView.setImage(bmp)
+            } else {
+                val quad = withContext(Dispatchers.Default) { Scanner.detect(bmp) }
+                    ?: hintQuad?.let { h -> List(4) { PointF(h[it * 2] * bmp.width, h[it * 2 + 1] * bmp.height) } }
+                cropView.setImage(bmp, quad ?: Scanner.defaultQuad(bmp.width, bmp.height))
+                if (quad == null) {
+                    hint.text = if (App.openCvReady) "Page edges not found — drag the corners to fit the page"
+                    else "Edge detection engine not available — drag the corners to fit the page"
+                }
             }
             setBusy(false)
         }
@@ -141,13 +159,13 @@ class CropActivity : AppCompatActivity() {
         }
     }
 
-    private fun autoDetect(showToast: Boolean) {
+    private fun autoDetect() {
         val bmp = source ?: return
         setBusy(true)
         lifecycleScope.launch {
             val quad = withContext(Dispatchers.Default) { Scanner.detect(bmp) }
             if (quad != null) cropView.setQuad(quad)
-            else if (showToast) Toast.makeText(this@CropActivity, "No clear edges found — adjust manually", Toast.LENGTH_SHORT).show()
+            else Toast.makeText(this@CropActivity, "No clear page edges found — adjust by hand", Toast.LENGTH_SHORT).show()
             setBusy(false)
         }
     }
@@ -158,8 +176,12 @@ class CropActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val rotated = withContext(Dispatchers.Default) { ImageUtils.rotate(bmp, 90f, recycleSrc = false) }
             source = rotated
-            val quad = withContext(Dispatchers.Default) { Scanner.detect(rotated) }
-            cropView.setImage(rotated, quad ?: Scanner.defaultQuad(rotated.width, rotated.height))
+            if (mode == MODE_SIG) {
+                ratioView.setImage(rotated)
+            } else {
+                val quad = withContext(Dispatchers.Default) { Scanner.detect(rotated) }
+                cropView.setImage(rotated, quad ?: Scanner.defaultQuad(rotated.width, rotated.height))
+            }
             setBusy(false)
         }
     }
@@ -168,18 +190,28 @@ class CropActivity : AppCompatActivity() {
         if (busy) return
         val bmp = source ?: return
         if (inFilterStep) { savePage(); return }
-        val quad = cropView.getQuad()
         setBusy(true)
+        if (mode == MODE_SIG) {
+            val r = ratioView.getCrop()
+            lifecycleScope.launch {
+                val out = Storage.newWorkFile(this@CropActivity, "png")
+                withContext(Dispatchers.IO) {
+                    val l = r.left.roundToInt().coerceIn(0, bmp.width - 1)
+                    val t = r.top.roundToInt().coerceIn(0, bmp.height - 1)
+                    val w = r.width().roundToInt().coerceIn(1, bmp.width - l)
+                    val h = r.height().roundToInt().coerceIn(1, bmp.height - t)
+                    val c = Bitmap.createBitmap(bmp, l, t, w, h)
+                    ImageUtils.savePng(c, out)
+                }
+                setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_OUT, out.absolutePath))
+                finish()
+            }
+            return
+        }
+        val quad = cropView.getQuad()
         lifecycleScope.launch {
             val w = withContext(Dispatchers.Default) { Scanner.warp(bmp, quad) }
             warped = w
-            if (mode == MODE_SIG) {
-                val out = Storage.newWorkFile(this@CropActivity, "png")
-                withContext(Dispatchers.IO) { ImageUtils.savePng(w, out) }
-                setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_OUT, out.absolutePath))
-                finish()
-                return@launch
-            }
             warpedSmall = withContext(Dispatchers.Default) {
                 val s = 1400f / max(w.width, w.height)
                 if (s < 1f) Bitmap.createScaledBitmap(w, (w.width * s).toInt(), (w.height * s).toInt(), true) else w
@@ -217,15 +249,27 @@ class CropActivity : AppCompatActivity() {
 
     private fun showFilterStep(show: Boolean) {
         inFilterStep = show
-        cropView.visibility = if (show) View.GONE else View.VISIBLE
+        val isSig = mode == MODE_SIG
+        if (!isSig) cropView.visibility = if (show) View.GONE else View.VISIBLE
         preview.visibility = if (show) View.VISIBLE else View.GONE
         cropTools.visibility = if (show) View.GONE else View.VISIBLE
         filterScroll.visibility = if (show) View.VISIBLE else View.GONE
         btnBack.text = if (show) "Re-crop" else "Cancel"
-        btnNext.text = if (show) "Save page" else "Crop"
-        title = if (show) "Choose a look" else "Adjust corners"
-        hint.text = if (show) "Magic color removes shadows; Black & white is best for text"
-        else "Drag corners or edges to fit the page"
+        btnNext.text = when {
+            show -> "Save page"
+            isSig -> "Next"
+            else -> "Crop"
+        }
+        toolbar.title = when {
+            isSig -> "Crop signature"
+            show -> "Choose a look"
+            else -> "Adjust corners"
+        }
+        hint.text = when {
+            isSig -> "Fit the signature inside the 4:3 box. Drag to move, drag a corner to resize."
+            show -> "Magic color removes shadows · Black & white is best for text"
+            else -> "Drag the corners or edges to fit the page. A magnifier helps with precision."
+        }
     }
 
     private fun goBack() {

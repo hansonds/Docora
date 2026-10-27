@@ -1,8 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical">
+
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar"
+        style="@style/Widget.App.Toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        app:navigationIcon="@drawable/ic_back" />
 
     <FrameLayout
         android:layout_width="match_parent"
@@ -23,7 +31,7 @@
             android:layout_gravity="center"
             android:gravity="center"
             android:padding="32dp"
-            android:text="No pages yet.\nAdd pages with the camera or from your photos."
+            android:text="No pages yet.\nTap Camera to scan, or Photos to import."
             android:textSize="15sp" />
 
         <ProgressBar
@@ -49,7 +57,7 @@
             android:layout_weight="1"
             android:text="Camera"
             app:icon="@drawable/ic_camera"
-            xmlns:app="http://schemas.android.com/apk/res-auto" />
+            />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnPhotos"
@@ -60,7 +68,7 @@
             android:layout_weight="1"
             android:text="Photos"
             app:icon="@drawable/ic_photo"
-            xmlns:app="http://schemas.android.com/apk/res-auto" />
+            />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnSave"
@@ -70,6 +78,6 @@
             android:layout_weight="1.2"
             android:text="Save PDF"
             app:icon="@drawable/ic_pdf"
-            xmlns:app="http://schemas.android.com/apk/res-auto" />
+            />
     </LinearLayout>
 </LinearLayout>

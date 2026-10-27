@@ -12,8 +12,18 @@ class App : Application() {
         openCvReady = try {
             OpenCVLoader.initLocal()
         } catch (t: Throwable) {
-            Log.e("ScanSign", "OpenCV failed to load", t)
+            Log.e("ScanSign", "OpenCV initLocal failed", t)
             false
+        }
+        if (!openCvReady) {
+            // fallback: load the native library directly
+            openCvReady = try {
+                System.loadLibrary("opencv_java4")
+                true
+            } catch (t: Throwable) {
+                Log.e("ScanSign", "OpenCV native library missing", t)
+                false
+            }
         }
     }
 

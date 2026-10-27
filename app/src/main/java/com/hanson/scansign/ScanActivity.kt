@@ -45,7 +45,6 @@ class ScanActivity : AppCompatActivity() {
         const val EXTRA_START = "start"
         const val START_CAMERA = "camera"
         const val START_GALLERY = "gallery"
-        private const val STATE_CAMERA_FILE = "cameraFile"
         private const val STATE_EDIT_INDEX = "editIndex"
 
         fun intent(ctx: Context, start: String?) =
@@ -57,18 +56,26 @@ class ScanActivity : AppCompatActivity() {
     private lateinit var progress: ProgressBar
     private val adapter = PageAdapter()
 
-    private var cameraFile: File? = null
+    /** True while the current crop came from the in-app camera (so we return to it for the next page). */
+    private var fromCamera = false
     /** Originals waiting to be cropped (multi-select import). */
     private val queue = ArrayDeque<File>()
     private var currentOriginal: File? = null
     /** Index of a page being re-cropped, or -1 for a new page. */
     private var editIndex = -1
 
-    private val takePicture = registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
-        val f = cameraFile
-        if (ok && f != null && f.exists() && f.length() > 0) {
-            editIndex = -1
-            startCrop(f)
+    private val cameraLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        when (res.resultCode) {
+            Activity.RESULT_OK -> {
+                val path = res.data?.getStringExtra(CameraActivity.EXTRA_FILE) ?: return@registerForActivityResult
+                editIndex = -1
+                fromCamera = true
+                currentOriginal = File(path)
+                cropLauncher.launch(
+                    CropActivity.intent(this, File(path), CropActivity.MODE_DOC, res.data?.getFloatArrayExtra(CameraActivity.EXTRA_HINT))
+                )
+            }
+            CameraActivity.RESULT_GALLERY -> openGallery()
         }
     }
 
@@ -89,16 +96,25 @@ class ScanActivity : AppCompatActivity() {
                 list.scrollToPosition(ScanSession.pages.size - 1)
             }
         }
+        val wasEdit = editIndex >= 0
         editIndex = -1
         refreshEmpty()
+        if (fromCamera && !wasEdit) {
+            // straight back to the camera for the next page; "Done" there returns here
+            fromCamera = false
+            openCamera()
+            return@registerForActivityResult
+        }
+        fromCamera = false
         nextInQueue()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_scan)
-        title = "New scan"
+        setSupportActionBar(findViewById(R.id.toolbar))
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
+        title = "New scan"
 
         list = findViewById(R.id.pages)
         empty = findViewById(R.id.empty)
@@ -115,7 +131,6 @@ class ScanActivity : AppCompatActivity() {
         })
 
         if (savedInstanceState != null) {
-            cameraFile = savedInstanceState.getString(STATE_CAMERA_FILE)?.let { File(it) }
             editIndex = savedInstanceState.getInt(STATE_EDIT_INDEX, -1)
         } else {
             when (intent.getStringExtra(EXTRA_START)) {
@@ -128,7 +143,6 @@ class ScanActivity : AppCompatActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        cameraFile?.let { outState.putString(STATE_CAMERA_FILE, it.absolutePath) }
         outState.putInt(STATE_EDIT_INDEX, editIndex)
     }
 
@@ -152,13 +166,7 @@ class ScanActivity : AppCompatActivity() {
     }
 
     private fun openCamera() {
-        val f = Storage.newWorkFile(this, "jpg")
-        cameraFile = f
-        try {
-            takePicture.launch(Storage.uriFor(this, f))
-        } catch (e: Exception) {
-            Toast.makeText(this, "No camera app found", Toast.LENGTH_LONG).show()
-        }
+        cameraLauncher.launch(CameraActivity.intent(this, CameraActivity.MODE_DOC, ScanSession.pages.size))
     }
 
     private fun openGallery() {
@@ -185,6 +193,7 @@ class ScanActivity : AppCompatActivity() {
     private fun nextInQueue() {
         val f = queue.removeFirstOrNull() ?: return
         editIndex = -1
+        fromCamera = false
         startCrop(f)
     }
 
@@ -210,6 +219,7 @@ class ScanActivity : AppCompatActivity() {
             if (index !in pages.indices) return@setOnMenuItemClickListener true
             when (item.itemId) {
                 1 -> {
+                    fromCamera = false
                     editIndex = index
                     currentOriginal = pages[index].original
                     cropLauncher.launch(CropActivity.intent(this, pages[index].original, CropActivity.MODE_DOC))
@@ -327,8 +337,8 @@ class ScanActivity : AppCompatActivity() {
                 .setMessage(
                     file.name + if (exported) "\n\nA copy is in Downloads › PDF ScanSign." else ""
                 )
-                .setPositiveButton("Add signature") { _, _ ->
-                    startActivity(PdfSignActivity.intent(this@ScanActivity, file))
+                .setPositiveButton("Open & sign") { _, _ ->
+                    startActivity(PdfEditorActivity.intent(this@ScanActivity, file))
                     finish()
                 }
                 .setNeutralButton("Share") { _, _ ->

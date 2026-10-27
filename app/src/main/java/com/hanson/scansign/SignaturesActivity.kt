@@ -30,7 +30,6 @@ class SignaturesActivity : AppCompatActivity() {
     companion object {
         const val EXTRA_PICK = "pick"
         const val EXTRA_SIG = "sig"
-        private const val STATE_CAMERA_FILE = "cameraFile"
 
         fun intent(ctx: Context, pick: Boolean) =
             Intent(ctx, SignaturesActivity::class.java).putExtra(EXTRA_PICK, pick)
@@ -42,11 +41,9 @@ class SignaturesActivity : AppCompatActivity() {
     private var pickMode = false
     private var items: List<File> = emptyList()
     private val adapter = SigAdapter()
-    private var cameraFile: File? = null
-
-    private val takePicture = registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
-        val f = cameraFile
-        if (ok && f != null && f.exists() && f.length() > 0) crop(f)
+    private val cameraLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        val path = res.data?.getStringExtra(CameraActivity.EXTRA_FILE)
+        if (res.resultCode == Activity.RESULT_OK && path != null) crop(File(path))
     }
 
     private val pickImage = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -80,9 +77,9 @@ class SignaturesActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_signatures)
         pickMode = intent.getBooleanExtra(EXTRA_PICK, false)
-        title = if (pickMode) "Choose a signature" else "My signatures"
+        setSupportActionBar(findViewById(R.id.toolbar))
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        cameraFile = savedInstanceState?.getString(STATE_CAMERA_FILE)?.let { File(it) }
+        title = if (pickMode) "Choose a signature" else "My signatures"
 
         list = findViewById(R.id.list)
         empty = findViewById(R.id.empty)
@@ -91,23 +88,12 @@ class SignaturesActivity : AppCompatActivity() {
         list.adapter = adapter
 
         findViewById<MaterialButton>(R.id.btnCamera).setOnClickListener {
-            val f = Storage.newWorkFile(this, "jpg")
-            cameraFile = f
-            try {
-                takePicture.launch(Storage.uriFor(this, f))
-            } catch (e: Exception) {
-                Toast.makeText(this, "No camera app found", Toast.LENGTH_LONG).show()
-            }
+            cameraLauncher.launch(CameraActivity.intent(this, CameraActivity.MODE_SIG))
         }
         findViewById<MaterialButton>(R.id.btnGallery).setOnClickListener {
             pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
         }
         reload()
-    }
-
-    override fun onSaveInstanceState(outState: Bundle) {
-        super.onSaveInstanceState(outState)
-        cameraFile?.let { outState.putString(STATE_CAMERA_FILE, it.absolutePath) }
     }
 
     override fun onSupportNavigateUp(): Boolean {

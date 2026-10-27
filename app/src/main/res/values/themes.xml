@@ -1,13 +1,56 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.ScanSign" parent="Theme.Material3.DayNight">
-        <item name="colorPrimary">@color/brand</item>
-        <item name="colorOnPrimary">#FFFFFF</item>
-        <item name="colorSecondary">@color/accent</item>
+    <style name="Theme.ScanSign" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/md_primary</item>
+        <item name="colorOnPrimary">@color/md_on_primary</item>
+        <item name="colorPrimaryContainer">@color/md_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/md_on_primary_container</item>
+        <item name="colorSecondary">@color/md_secondary</item>
+        <item name="colorSecondaryContainer">@color/md_secondary_container</item>
+        <item name="colorOnSecondaryContainer">@color/md_on_secondary_container</item>
+        <item name="android:colorBackground">@color/md_background</item>
+        <item name="colorSurface">@color/md_surface</item>
+        <item name="colorSurfaceVariant">@color/md_surface_variant</item>
+        <item name="colorOnSurface">@color/md_on_surface</item>
+        <item name="colorOnSurfaceVariant">@color/md_on_surface_variant</item>
+        <item name="colorOutline">@color/md_outline</item>
+        <item name="android:windowBackground">@color/md_background</item>
+        <item name="android:statusBarColor">@color/md_background</item>
+        <item name="android:navigationBarColor">@color/md_background</item>
+        <item name="android:windowLightStatusBar">@bool/light_bars</item>
+        <item name="materialCardViewStyle">@style/Widget.App.Card</item>
     </style>
-    <style name="Theme.ScanSign.Dark" parent="Theme.Material3.Dark">
-        <item name="colorPrimary">#8FB0FF</item>
-        <item name="colorSecondary">@color/accent</item>
+
+    <style name="Theme.ScanSign.Dark" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">#B4C5FF</item>
+        <item name="colorSecondary">#5ADBC6</item>
         <item name="android:windowBackground">@color/surface_dark</item>
+        <item name="android:statusBarColor">@color/surface_dark</item>
+        <item name="android:navigationBarColor">@color/surface_dark</item>
+    </style>
+
+    <style name="Theme.ScanSign.Camera" parent="Theme.ScanSign.Dark">
+        <item name="android:statusBarColor">#000000</item>
+        <item name="android:navigationBarColor">#000000</item>
+        <item name="android:windowBackground">#000000</item>
+    </style>
+
+    <style name="Widget.App.Card" parent="Widget.Material3.CardView.Elevated">
+        <item name="cardCornerRadius">16dp</item>
+        <item name="cardElevation">1dp</item>
+        <item name="cardBackgroundColor">@color/md_surface</item>
+    </style>
+
+    <style name="Widget.App.Toolbar" parent="Widget.Material3.Toolbar">
+        <item name="android:background">@color/md_background</item>
+        <item name="titleTextAppearance">@style/TextAppearance.App.ToolbarTitle</item>
+    </style>
+
+    <style name="TextAppearance.App.ToolbarTitle" parent="TextAppearance.Material3.TitleLarge">
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="TextAppearance.App.Section" parent="TextAppearance.Material3.TitleMedium">
+        <item name="android:textStyle">bold</item>
     </style>
 </resources>

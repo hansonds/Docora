@@ -1,9 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/surface_dark"
     android:orientation="vertical">
+
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        android:background="@color/surface_dark"
+        app:navigationIcon="@drawable/ic_back"
+        app:navigationIconTint="#FFFFFF"
+        app:titleTextColor="#FFFFFF" />
 
     <FrameLayout
         android:layout_width="match_parent"
@@ -14,6 +24,12 @@
             android:id="@+id/cropView"
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
+
+        <com.hanson.scansign.RatioCropView
+            android:id="@+id/ratioView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
 
         <ImageView
             android:id="@+id/preview"
@@ -54,8 +70,7 @@
             android:id="@+id/filterGroup"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            app:singleLine="true"
-            xmlns:app="http://schemas.android.com/apk/res-auto" />
+            app:singleLine="true" />
     </HorizontalScrollView>
 
     <LinearLayout
@@ -70,25 +85,40 @@
             android:id="@+id/btnAuto"
             style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="64dp"
             android:layout_weight="1"
-            android:text="Auto detect" />
+            android:text="Auto detect"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp"
+            app:icon="@drawable/ic_auto"
+            app:iconGravity="top"
+            app:iconTint="#FFFFFF" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnFull"
             style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="64dp"
             android:layout_weight="1"
-            android:text="Full image" />
+            android:text="Full image"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp"
+            app:icon="@drawable/ic_crop"
+            app:iconGravity="top"
+            app:iconTint="#FFFFFF" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnRotate"
             style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="64dp"
             android:layout_weight="1"
-            android:text="Rotate" />
+            android:text="Rotate"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp"
+            app:icon="@drawable/ic_rotate"
+            app:iconGravity="top"
+            app:iconTint="#FFFFFF" />
     </LinearLayout>
 
     <LinearLayout
@@ -104,7 +134,8 @@
             android:layout_height="56dp"
             android:layout_marginEnd="8dp"
             android:layout_weight="1"
-            android:text="Cancel" />
+            android:text="Retake"
+            android:textColor="#FFFFFF" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnNext"
@@ -112,6 +143,6 @@
             android:layout_height="56dp"
             android:layout_marginStart="8dp"
             android:layout_weight="1"
-            android:text="Crop" />
+            android:text="Next" />
     </LinearLayout>
 </LinearLayout>
