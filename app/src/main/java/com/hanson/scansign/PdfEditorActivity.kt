@@ -50,10 +50,14 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             Color.rgb(230, 120, 0), Color.rgb(110, 110, 110)
         )
 
-        fun intent(ctx: Context, pdf: File, displayName: String? = null) =
+        const val EXTRA_URI = "uri"
+
+        /** [sourceUri] = where the PDF came from, so "Replace original" can write back to it. */
+        fun intent(ctx: Context, pdf: File, displayName: String? = null, sourceUri: android.net.Uri? = null) =
             Intent(ctx, PdfEditorActivity::class.java)
                 .putExtra(EXTRA_PDF, pdf.absolutePath)
                 .putExtra(EXTRA_NAME, displayName ?: pdf.name)
+                .putExtra(EXTRA_URI, sourceUri)
     }
 
     override val recreateOnThemeChange = false
@@ -132,6 +136,8 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         if (path == null) { finish(); return }
         source = File(path)
         displayName = intent.getStringExtra(EXTRA_NAME) ?: source.name
+        sourceUri = if (android.os.Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(EXTRA_URI, android.net.Uri::class.java)
+        else @Suppress("DEPRECATION") intent.getParcelableExtra(EXTRA_URI)
         toolbar.title = displayName
         toolbar.setNavigationOnClickListener { confirmLeave() }
         doc.listener = this
@@ -662,7 +668,6 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         m.add(0, 1, 0, "Undo").setIcon(R.drawable.ic_undo).setShowAsAction(always)
         m.add(0, 2, 1, "Redo").setIcon(R.drawable.ic_redo).setShowAsAction(always)
         m.add(0, 3, 2, "Save").setIcon(R.drawable.ic_save).setShowAsAction(always)
-        m.add(0, 7, 3, "Save as").setIcon(R.drawable.ic_save_as).setShowAsAction(always)
         m.add(0, 5, 4, "Share…")
         m.add(0, 8, 5, "Print")
         m.add(0, 9, 6, "Night reading").apply { isCheckable = true; isChecked = getSharedPreferences("view", MODE_PRIVATE).getBoolean("night", false) }
@@ -673,7 +678,6 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                 1 -> undo()
                 2 -> redo()
                 3 -> if (requireEditable()) quickSave()
-                7 -> if (requireEditable()) saveAsDialog()
                 4 -> goToPageDialog()
                 5 -> shareCurrent()
                 8 -> printCurrent()
@@ -764,7 +768,6 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         toolButton(bar, "Get text", R.drawable.ic_ocr) { setTool(ActiveTool.NONE); extractText() }
         toolButton(bar, "Go to", R.drawable.ic_pdf) { goToPageDialog() }
         toolButton(bar, "Save", R.drawable.ic_save) { if (requireEditable()) { setTool(ActiveTool.NONE); quickSave() } }
-        toolButton(bar, "Save as", R.drawable.ic_save_as) { if (requireEditable()) { setTool(ActiveTool.NONE); saveAsDialog() } }
         toolButton(bar, "Share", R.drawable.ic_share) { setTool(ActiveTool.NONE); shareCurrent() }
         toolButton(bar, "Print", R.drawable.ic_print) { setTool(ActiveTool.NONE); printCurrent() }
     }
@@ -939,84 +942,140 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
 
     private var organizeAfterSave = false
     private var shareAfterSave = false
-    private var pendingSaveAs: Pair<String, Boolean>? = null
+    private var finishAfterSave = false
+    /** Original location of a PDF opened from another app / the file picker. */
+    private var sourceUri: android.net.Uri? = null
+    private var pendingCopy: Pair<String, Boolean>? = null
 
     private val createDoc = registerForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
-        val ps = pendingSaveAs ?: return@registerForActivityResult
-        pendingSaveAs = null
+        val pc = pendingCopy ?: return@registerForActivityResult
+        pendingCopy = null
         if (uri == null) return@registerForActivityResult
-        performSave(Storage.uniquePdf(this, ps.first), overwrite = false, flatten = ps.second, export = false, copyTo = uri, showDialog = true)
+        performSave(Storage.uniquePdf(this, pc.first), overwrite = false, flatten = pc.second, export = false, copyTo = uri, showDialog = true)
     }
 
     private fun baseName() = displayName.removeSuffix(".pdf").removeSuffix(".PDF")
 
     private fun inLibrary() = source.parentFile?.absolutePath == Storage.pdfDir(this).absolutePath
 
-    /**
-     * Save: files from the app's library are updated in place; other PDFs (opened from elsewhere)
-     * get a "_signed" copy in the library and Downloads. Editing continues after saving.
-     */
-    private var finishAfterSave = false
+    /** True if we can write back to the PDF's original location. */
+    private fun canWriteBack(): Boolean {
+        val u = sourceUri ?: return false
+        return try {
+            contentResolver.openFileDescriptor(u, "rw")?.use { true } ?: false
+        } catch (e: Exception) {
+            false
+        }
+    }
 
+    /** Asks how to save (replace the original or keep it and save a copy), then does what was requested after. */
     private fun quickSave(thenOrganize: Boolean = false, thenShare: Boolean = false, thenFinish: Boolean = false) {
-        organizeAfterSave = thenOrganize
-        shareAfterSave = thenShare
-        finishAfterSave = thenFinish
         commitEdit()
         pdf ?: return
         if (!dirty) {
             when {
                 thenOrganize -> pdf?.let { organize.launch(OrganizeActivity.intent(this, it.file, displayName)) }
                 thenShare -> Ui.share(this, source)
+                thenFinish -> finish()
                 else -> Toast.makeText(this, "No changes to save", Toast.LENGTH_SHORT).show()
             }
             return
         }
-        if (inLibrary()) performSave(source, overwrite = true, flatten = false, export = false, copyTo = null, showDialog = false)
-        else {
-            val base = baseName().let { if (it.endsWith("_signed")) it else it + "_signed" }
-            performSave(Storage.uniquePdf(this, base), overwrite = false, flatten = false, export = true, copyTo = null, showDialog = false)
+        lifecycleScope.launch {
+            val writable = inLibrary() || withContext(Dispatchers.IO) { canWriteBack() }
+            showSaveSheet(writable, thenOrganize, thenShare, thenFinish)
         }
     }
 
-    // kept for callers that ask to save before another action
     private fun saveDialog(thenOrganize: Boolean = false) = quickSave(thenOrganize = thenOrganize)
 
-    /** Save as: new name, optional form locking, and where to put it. */
-    private fun saveAsDialog() {
-        commitEdit()
+    private fun showSaveSheet(canReplace: Boolean, thenOrganize: Boolean, thenShare: Boolean, thenFinish: Boolean) {
         val p = pdf ?: return
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val name = EditText(this).apply {
-            setText(baseName().let { if (it.endsWith("_signed") || !dirty) it else it + "_signed" })
-            setSelectAllOnFocus(true)
-            hint = "File name"
-            maxLines = 1
-            inputType = InputType.TYPE_CLASS_TEXT
+        val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
+        val v = LayoutInflater.from(this).inflate(R.layout.sheet_save, null)
+        sheet.setContentView(v)
+        sheet.behavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED
+        sheet.behavior.skipCollapsed = true
+        v.findViewById<TextView>(R.id.fileName).text = displayName
+
+        val primary = androidx.core.content.ContextCompat.getColor(this, Themes.accent(this).primary)
+        fun themeColor(attr: Int, fallback: Int): Int {
+            val tv = android.util.TypedValue()
+            return if (theme.resolveAttribute(attr, tv, true)) {
+                if (tv.resourceId != 0) androidx.core.content.ContextCompat.getColor(this, tv.resourceId) else tv.data
+            } else fallback
         }
-        box.addView(name)
-        val where = android.widget.RadioGroup(this)
-        val lib = android.widget.RadioButton(this).apply { id = View.generateViewId(); text = "App library + Downloads › PDF ScanSign"; isChecked = true }
-        val pick = android.widget.RadioButton(this).apply { id = View.generateViewId(); text = "Choose a folder…" }
-        where.addView(lib); where.addView(pick)
-        box.addView(TextView(this).apply { text = "Save to"; setPadding(0, (12 * resources.displayMetrics.density).toInt(), 0, 0) })
-        box.addView(where)
-        val flatten = CheckBox(this).apply { text = "Lock form fields (can't be edited later)" }
-        if (p.fields.isNotEmpty()) box.addView(flatten)
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Save as")
-            .setView(padded(box))
-            .setPositiveButton("Save") { _, _ ->
-                val n = Storage.cleanName(name.text.toString())
-                if (where.checkedRadioButtonId == pick.id) {
-                    pendingSaveAs = Pair(n, flatten.isChecked)
+        val outline = themeColor(com.google.android.material.R.attr.colorOutline, Color.GRAY)
+        val surface = themeColor(com.google.android.material.R.attr.colorSurface, Color.WHITE)
+        val selectedBg = themeColor(com.google.android.material.R.attr.colorPrimaryContainer, Color.rgb(220, 228, 255))
+
+        val replace = v.findViewById<com.google.android.material.card.MaterialCardView>(R.id.optReplace)
+        val copy = v.findViewById<com.google.android.material.card.MaterialCardView>(R.id.optCopy)
+        val copyBox = v.findViewById<View>(R.id.copyBox)
+        val nameField = v.findViewById<EditText>(R.id.name)
+        val where = v.findViewById<ChipGroup>(R.id.where)
+        val flatten = v.findViewById<MaterialSwitch>(R.id.flatten)
+        val btn = v.findViewById<MaterialButton>(R.id.btnSave)
+        flatten.visibility = if (p.fields.isNotEmpty()) View.VISIBLE else View.GONE
+
+        fun setup(card: View, title: String, sub: String, icon: Int, badge: Boolean) {
+            card.findViewById<TextView>(R.id.title).text = title
+            card.findViewById<TextView>(R.id.subtitle).text = sub
+            card.findViewById<View>(R.id.badge).visibility = if (badge) View.VISIBLE else View.GONE
+            card.findViewById<View>(R.id.size).visibility = View.GONE
+            card.findViewById<View>(R.id.saving).visibility = View.GONE
+            card.findViewById<View>(R.id.iconBox).backgroundTintList = android.content.res.ColorStateList.valueOf(selectedBg)
+            card.findViewById<android.widget.ImageView>(R.id.icon).apply {
+                setImageResource(icon)
+                imageTintList = android.content.res.ColorStateList.valueOf(primary)
+            }
+        }
+        setup(replace, "Replace original",
+            if (canReplace) "Overwrite $displayName" else "Not possible — this file is read-only", R.drawable.ic_save, false)
+        setup(copy, "Save as new copy", "Keep the original unchanged", R.drawable.ic_save_as, false)
+        replace.alpha = if (canReplace) 1f else 0.5f
+
+        val prefs = getSharedPreferences("save", MODE_PRIVATE)
+        var useReplace = canReplace && prefs.getBoolean("replace", true)
+        nameField.setText(baseName().let { if (it.endsWith("_signed")) it else it + "_signed" })
+
+        fun refresh() {
+            for ((card, sel) in listOf(replace to useReplace, copy to !useReplace)) {
+                card.strokeWidth = ((if (sel) 2.5f else 1f) * resources.displayMetrics.density).toInt()
+                card.strokeColor = if (sel) primary else outline
+                card.setCardBackgroundColor(if (sel) selectedBg else surface)
+            }
+            copyBox.visibility = if (useReplace) View.GONE else View.VISIBLE
+            btn.text = if (useReplace) "Replace original" else "Save copy"
+        }
+        replace.setOnClickListener {
+            if (canReplace) { useReplace = true; refresh() }
+            else Toast.makeText(this, "This file can't be changed — save a copy instead", Toast.LENGTH_SHORT).show()
+        }
+        copy.setOnClickListener { useReplace = false; refresh() }
+        refresh()
+
+        btn.setOnClickListener {
+            prefs.edit().putBoolean("replace", useReplace).apply()
+            organizeAfterSave = thenOrganize
+            shareAfterSave = thenShare
+            finishAfterSave = thenFinish
+            sheet.dismiss()
+            val lock = flatten.isChecked
+            if (useReplace) {
+                if (inLibrary()) performSave(source, overwrite = true, flatten = lock, export = false, copyTo = null, showDialog = false)
+                else performSave(source, overwrite = true, flatten = lock, export = false, copyTo = sourceUri, showDialog = false)
+            } else {
+                val n = Storage.cleanName(nameField.text.toString())
+                if (where.checkedChipId == R.id.wherePick) {
+                    pendingCopy = Pair(n, lock)
                     try { createDoc.launch("$n.pdf") } catch (e: Exception) { Toast.makeText(this, "No file picker available", Toast.LENGTH_SHORT).show() }
                 } else {
-                    performSave(Storage.uniquePdf(this, n), overwrite = false, flatten = flatten.isChecked, export = true, copyTo = null, showDialog = true)
+                    performSave(Storage.uniquePdf(this, n), overwrite = false, flatten = lock, export = true, copyTo = null, showDialog = !thenFinish && !thenShare && !thenOrganize)
                 }
             }
-            .setNegativeButton("Cancel", null)
-            .show()
+        }
+        sheet.show()
     }
 
     private fun performSave(target: File, overwrite: Boolean, flatten: Boolean, export: Boolean, copyTo: android.net.Uri?, showDialog: Boolean) {
@@ -1035,7 +1094,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                     }
                     val exported = export && Storage.exportToDownloads(this@PdfEditorActivity, target)
                     val copied = copyTo?.let { uri ->
-                        contentResolver.openOutputStream(uri)?.use { out -> target.inputStream().use { it.copyTo(out) } } != null
+                        contentResolver.openOutputStream(uri, "wt")?.use { out -> target.inputStream().use { it.copyTo(out) } } != null
                     } ?: false
                     Triple(target, exported, copied)
                 } catch (e: Throwable) {
@@ -1048,6 +1107,13 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                 return@launch
             }
             val (file, exported, copied) = result
+            if (copyTo != null && !copied) {
+                MaterialAlertDialogBuilder(this@PdfEditorActivity)
+                    .setTitle("Couldn't write to the original file")
+                    .setMessage("Your changes are kept in the app as ${file.name}. Use Save → Save as new copy to put it somewhere else.")
+                    .setPositiveButton("OK", null)
+                    .show()
+            }
             if (finishAfterSave) {
                 Toast.makeText(this@PdfEditorActivity, "Saved", Toast.LENGTH_SHORT).show()
                 dirty = false

@@ -46,7 +46,13 @@ class MainActivity : BaseActivity() {
     private val thumbCache = HashMap<String, Bitmap>()
 
     private val openPdf = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) openExternalPdf(uri)
+        if (uri != null) {
+            try {
+                contentResolver.takePersistableUriPermission(uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            } catch (_: Exception) {}
+            openExternalPdf(uri)
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -161,7 +167,7 @@ class MainActivity : BaseActivity() {
                 Toast.makeText(this@MainActivity, "Could not open that PDF", Toast.LENGTH_LONG).show()
                 return@launch
             }
-            startActivity(PdfEditorActivity.intent(this@MainActivity, f, name))
+            startActivity(PdfEditorActivity.intent(this@MainActivity, f, name, uri))
         }
     }
 

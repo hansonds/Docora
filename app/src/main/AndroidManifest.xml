@@ -49,6 +49,7 @@
             android:theme="@style/Theme.ScanSign.Camera" />
         <activity android:name=".AboutActivity" />
         <activity android:name=".ToolsActivity" />
+        <activity android:name=".MergeActivity" />
         <activity android:name=".OrganizeActivity" />
         <activity android:name=".TextResultActivity" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".SettingsActivity" />
