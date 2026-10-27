@@ -28,7 +28,7 @@ import java.io.File
 import kotlin.math.max
 
 /** Shows text recognised (on the phone) from PDF pages or scanned images. Copy / share / save. */
-class TextResultActivity : AppCompatActivity() {
+class TextResultActivity : BaseActivity() {
 
     companion object {
         private const val EXTRA_PDF = "pdf"

@@ -350,7 +350,23 @@ class PdfDocView @JvmOverloads constructor(
 
     // ======================= public API =======================
 
+    /** Night reading: pages shown inverted (white text on dark). Saved PDFs are not affected. */
+    var nightMode = false
+        set(v) {
+            field = v
+            bmpPaint.colorFilter = if (v) android.graphics.ColorMatrixColorFilter(floatArrayOf(
+                -1f, 0f, 0f, 0f, 255f,
+                0f, -1f, 0f, 0f, 255f,
+                0f, 0f, -1f, 0f, 255f,
+                0f, 0f, 0f, 1f, 0f
+            )) else null
+            pageFill.color = if (v) Color.BLACK else Color.WHITE
+            invalidate()
+        }
+
     fun setDocument(geoms: List<PageGeom>, renderer: PageRenderer, widgets: List<FormWidget>, items: MutableList<EditItem>) {
+        pageWords.clear()
+        selPage = -1; selA = -1; selB = -1; pendingSel = null
         this.geoms = geoms
         this.renderer = renderer
         this.widgetsByPage = widgets.groupBy { it.page }

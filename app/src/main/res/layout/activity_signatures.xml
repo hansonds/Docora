@@ -18,7 +18,7 @@
         android:layout_height="wrap_content"
         android:paddingHorizontal="16dp"
         android:paddingTop="12dp"
-        android:text="Sign on plain white paper, then photograph it. You crop it to a 4:3 box and the paper background is removed automatically."
+        android:text="Photograph a signature on white paper (the paper is removed automatically) or draw one with your finger."
         android:textColor="?attr/colorOnSurfaceVariant"
         android:textSize="13sp" />
 
@@ -52,31 +52,45 @@
             android:visibility="gone" />
     </FrameLayout>
 
-    <LinearLayout
+    <com.google.android.material.card.MaterialCardView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:padding="12dp">
+        app:cardCornerRadius="0dp"
+        app:cardElevation="8dp">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnCamera"
-            style="@style/Widget.App.PrimaryButton"
-            android:layout_height="52dp"
-            android:layout_width="0dp"
-            android:layout_marginEnd="6dp"
-            android:layout_weight="1"
-            android:text="Camera"
-            app:icon="@drawable/ic_camera" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingHorizontal="8dp"
+            android:paddingVertical="6dp">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnGallery"
-            style="@style/Widget.App.SecondaryButton"
-            android:layout_height="52dp"
-            android:layout_width="0dp"
-            android:layout_marginStart="6dp"
-            android:layout_weight="1"
-            android:text="Gallery"
-            app:icon="@drawable/ic_photo" />
-    </LinearLayout>
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnCamera"
+                style="@style/Widget.App.ToolButton"
+                android:layout_width="0dp"
+                android:layout_height="64dp"
+                android:layout_weight="1"
+                android:text="Camera"
+                app:icon="@drawable/ic_camera" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnGallery"
+                style="@style/Widget.App.ToolButton"
+                android:layout_width="0dp"
+                android:layout_height="64dp"
+                android:layout_weight="1"
+                android:text="Gallery"
+                app:icon="@drawable/ic_photo" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnDraw"
+                style="@style/Widget.App.ToolButton"
+                android:layout_width="0dp"
+                android:layout_height="64dp"
+                android:layout_weight="1"
+                android:text="Draw"
+                app:icon="@drawable/ic_draw" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
 </LinearLayout>

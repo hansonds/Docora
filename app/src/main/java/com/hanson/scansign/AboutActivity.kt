@@ -9,12 +9,13 @@ import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 
-class AboutActivity : AppCompatActivity() {
+class AboutActivity : BaseActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_about)
         findViewById<MaterialToolbar>(R.id.toolbar).setNavigationOnClickListener { finish() }
+        Ui.limitWidth(findViewById(R.id.content), 680)
 
         findViewById<TextView>(R.id.version).text = "Version ${BuildConfig.VERSION_NAME}"
         findViewById<TextView>(R.id.engine).text = buildString {

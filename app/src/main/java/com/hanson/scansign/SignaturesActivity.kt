@@ -25,7 +25,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /** Saved signatures. In pick mode, tapping one returns it to the caller. */
-class SignaturesActivity : AppCompatActivity() {
+class SignaturesActivity : BaseActivity() {
 
     companion object {
         const val EXTRA_PICK = "pick"
@@ -64,6 +64,12 @@ class SignaturesActivity : AppCompatActivity() {
         }
     }
 
+    private val drawLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        val out = res.data?.getStringExtra(DrawSignatureActivity.EXTRA_OUT)
+        reload()
+        if (res.resultCode == Activity.RESULT_OK && out != null && pickMode) returnSignature(File(out))
+    }
+
     private val editLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
         val out = res.data?.getStringExtra(SignatureEditActivity.EXTRA_OUT)
         reload()
@@ -84,11 +90,14 @@ class SignaturesActivity : AppCompatActivity() {
         list = findViewById(R.id.list)
         empty = findViewById(R.id.empty)
         progress = findViewById(R.id.progress)
-        list.layoutManager = GridLayoutManager(this, 2)
+        list.layoutManager = GridLayoutManager(this, Ui.columns(this, 190, 2))
         list.adapter = adapter
 
         findViewById<MaterialButton>(R.id.btnCamera).setOnClickListener {
             cameraLauncher.launch(CameraActivity.intent(this, CameraActivity.MODE_SIG))
+        }
+        findViewById<MaterialButton>(R.id.btnDraw).setOnClickListener {
+            drawLauncher.launch(Intent(this, DrawSignatureActivity::class.java))
         }
         findViewById<MaterialButton>(R.id.btnGallery).setOnClickListener {
             pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))

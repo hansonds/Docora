@@ -43,7 +43,7 @@ import kotlin.math.sqrt
  * In-app camera. Document mode shows the detected page outline live and can capture
  * automatically when the page is held steady. Signature mode shows a 4:3 guide box.
  */
-class CameraActivity : AppCompatActivity() {
+class CameraActivity : BaseActivity() {
 
     companion object {
         const val EXTRA_MODE = "mode"
@@ -93,6 +93,10 @@ class CameraActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // phones: portrait camera; tablets can rotate freely
+        if (resources.configuration.smallestScreenWidthDp < 600) {
+            requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
         setContentView(R.layout.activity_camera)
         previewView = findViewById(R.id.preview)
         overlay = findViewById(R.id.overlay)

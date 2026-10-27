@@ -30,7 +30,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /** Removes the paper background from a cropped signature photo and saves it as a transparent PNG. */
-class SignatureEditActivity : AppCompatActivity() {
+class SignatureEditActivity : BaseActivity() {
 
     companion object {
         const val EXTRA_SRC = "src"

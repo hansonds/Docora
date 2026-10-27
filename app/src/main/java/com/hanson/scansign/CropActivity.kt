@@ -30,7 +30,7 @@ import kotlin.math.roundToInt
  * Signatures: fixed 4:3 rectangle crop.
  * Returns the output image path in [EXTRA_OUT].
  */
-class CropActivity : AppCompatActivity() {
+class CropActivity : BaseActivity() {
 
     companion object {
         const val EXTRA_SRC = "src"
