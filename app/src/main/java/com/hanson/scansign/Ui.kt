@@ -80,33 +80,8 @@ object Ui {
 
     fun toast(a: AppCompatActivity, msg: String) = Toast.makeText(a, msg, Toast.LENGTH_LONG).show()
 
-    /** Share a PDF, offering to make it smaller first (good for WhatsApp / email limits). */
-    fun share(a: AppCompatActivity, file: File) {
-        val size = android.text.format.Formatter.formatShortFileSize(a, file.length())
-        val opts = arrayOf<CharSequence>(
-            "Original  ·  $size",
-            "Compressed  ·  smaller, good for WhatsApp & email",
-            "Maximum compression  ·  smallest file"
-        )
-        MaterialAlertDialogBuilder(a)
-            .setTitle("Share PDF")
-            .setItems(opts) { _, which ->
-                if (which == 0) { Storage.sharePdf(a, file); return@setItems }
-                val level = if (which == 1) CompressLevel.MEDIUM else CompressLevel.STRONG
-                runJob(a, "Compressing", { p ->
-                    val dir = File(a.cacheDir, "share").apply { mkdirs() }
-                    val out = File(dir, file.name)
-                    val smaller = PdfTools.compress(file, out, level, p)
-                    if (smaller) out else file
-                }) { f ->
-                    if (f == file) toast(a, "This PDF can't get smaller — sharing the original")
-                    else Toast.makeText(a, "Compressed: $size → ${android.text.format.Formatter.formatShortFileSize(a, f.length())}", Toast.LENGTH_SHORT).show()
-                    Storage.sharePdf(a, f)
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
+    /** Share a PDF, with clear options to make it smaller first (good for WhatsApp / email limits). */
+    fun share(a: AppCompatActivity, file: File) = ShareSheet.show(a, file)
 
     /** Sends a PDF to the Android print system (printers, Save as PDF, etc.). */
     fun print(a: AppCompatActivity, file: File, name: String = file.name) {

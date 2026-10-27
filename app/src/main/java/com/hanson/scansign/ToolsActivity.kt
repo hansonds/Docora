@@ -112,7 +112,7 @@ class ToolsActivity : BaseActivity() {
         }
     }
 
-    private class Input(val file: File, val name: String) {
+    private class Input(val file: File, val name: String, val uri: Uri? = null) {
         val base: String get() = name.removeSuffix(".pdf").removeSuffix(".PDF")
     }
 
@@ -121,7 +121,7 @@ class ToolsActivity : BaseActivity() {
             val inputs = withContext(Dispatchers.IO) {
                 uris.mapNotNull { u ->
                     val f = Storage.copyUriToWork(this@ToolsActivity, u, "pdf") ?: return@mapNotNull null
-                    Input(f, Storage.displayName(this@ToolsActivity, u) ?: "document.pdf")
+                    Input(f, Storage.displayName(this@ToolsActivity, u) ?: "document.pdf", u)
                 }
             }
             if (inputs.isEmpty()) { Ui.toast(this@ToolsActivity, "Could not open the file"); return@launch }
@@ -132,7 +132,7 @@ class ToolsActivity : BaseActivity() {
     private fun run(t: Tool, inputs: List<Input>) {
         val first = inputs.first()
         when (t) {
-            Tool.SIGN -> startActivity(PdfEditorActivity.intent(this, first.file, first.name))
+            Tool.SIGN -> startActivity(PdfEditorActivity.intent(this, first.file, first.name, first.uri))
             Tool.ORGANIZE -> startActivity(OrganizeActivity.intent(this, first.file, first.name))
             Tool.MERGE -> merge(inputs)
             Tool.SPLIT -> split(first)
@@ -160,18 +160,7 @@ class ToolsActivity : BaseActivity() {
     }
 
     private fun merge(inputs: List<Input>) {
-        if (inputs.size < 2) { Ui.toast(this, "Select at least two PDFs (long-press to select several)"); return }
-        val order = inputs.toMutableList()
-        val names = order.joinToString("\n") { "• ${it.name}" }
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Merge ${order.size} PDFs")
-            .setMessage("They will be joined in this order:\n\n$names")
-            .setPositiveButton("Merge") { _, _ ->
-                saveJob("Merging", "Merged_${Storage.defaultName("")}".trimEnd('_')) { out, _ -> PdfTools.merge(order.map { it.file }, out) }
-            }
-            .setNeutralButton("Reverse order") { _, _ -> merge(order.reversed()) }
-            .setNegativeButton("Cancel", null)
-            .show()
+        startActivity(MergeActivity.intent(this, inputs.map { it.file }, inputs.map { it.name }))
     }
 
     private fun countPages(input: Input, then: (Int) -> Unit) {
