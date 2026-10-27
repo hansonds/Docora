@@ -24,7 +24,7 @@ import java.io.File
 import java.util.Collections
 
 /** Page organiser: reorder (drag), rotate, delete, duplicate, insert blank pages, extract a selection. */
-class OrganizeActivity : AppCompatActivity() {
+class OrganizeActivity : BaseActivity() {
 
     companion object {
         const val EXTRA_SRC = "src"
@@ -61,7 +61,7 @@ class OrganizeActivity : AppCompatActivity() {
         })
 
         grid = findViewById(R.id.grid)
-        grid.layoutManager = GridLayoutManager(this, 3)
+        grid.layoutManager = GridLayoutManager(this, Ui.columns(this, 125, 3))
         grid.adapter = adapter
         ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(
             ItemTouchHelper.UP or ItemTouchHelper.DOWN or ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT, 0

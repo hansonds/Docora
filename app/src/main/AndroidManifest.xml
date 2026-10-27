@@ -28,6 +28,9 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/pdf" />
             </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
         <activity
             android:name=".ScanActivity"
@@ -43,13 +46,13 @@
             android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".CameraActivity"
-            android:screenOrientation="portrait"
             android:theme="@style/Theme.ScanSign.Camera" />
         <activity android:name=".AboutActivity" />
         <activity android:name=".ToolsActivity" />
         <activity android:name=".OrganizeActivity" />
         <activity android:name=".TextResultActivity" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".SettingsActivity" />
+        <activity android:name=".DrawSignatureActivity" android:screenOrientation="unspecified" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

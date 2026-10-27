@@ -39,7 +39,7 @@ import java.util.Date
 import java.util.Locale
 
 /** Opens any PDF: view with zoom, fill forms, add signatures and text, save a copy. */
-class PdfEditorActivity : AppCompatActivity(), PdfDocView.Listener {
+class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
 
     companion object {
         const val EXTRA_PDF = "pdf"
@@ -56,6 +56,7 @@ class PdfEditorActivity : AppCompatActivity(), PdfDocView.Listener {
                 .putExtra(EXTRA_NAME, displayName ?: pdf.name)
     }
 
+    override val recreateOnThemeChange = false
     private lateinit var toolbar: MaterialToolbar
     private lateinit var doc: PdfDocView
     private lateinit var pagePill: TextView
@@ -134,6 +135,7 @@ class PdfEditorActivity : AppCompatActivity(), PdfDocView.Listener {
         toolbar.title = displayName
         toolbar.setNavigationOnClickListener { confirmLeave() }
         doc.listener = this
+        doc.nightMode = getSharedPreferences("view", MODE_PRIVATE).getBoolean("night", false)
 
         findViewById<MaterialButton>(R.id.btnZoomIn).setOnClickListener { doc.zoomIn() }
         findViewById<MaterialButton>(R.id.btnZoomOut).setOnClickListener { doc.zoomOut() }
@@ -217,6 +219,8 @@ class PdfEditorActivity : AppCompatActivity(), PdfDocView.Listener {
         pdf = p
         renderer = r
         doc.setDocument(p.geoms, r, p.widgets, items)
+        if (restorePage > 0) { val rp = restorePage; doc.post { doc.goToPage(rp) } }
+        restorePage = -1
         record()
         savedIndex = hIndex
         doc.drawAllValues = !p.valuesBaked && p.fields.isNotEmpty()
@@ -654,24 +658,52 @@ class PdfEditorActivity : AppCompatActivity(), PdfDocView.Listener {
 
     private fun setupToolbarMenu() {
         val m = toolbar.menu
-        m.add(0, 1, 0, "Undo").setIcon(R.drawable.ic_undo).setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
-        m.add(0, 2, 1, "Redo").setIcon(R.drawable.ic_redo).setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
-        m.add(0, 3, 2, "Save").setIcon(R.drawable.ic_save).setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
-        m.add(0, 4, 3, "Go to page")
-        m.add(0, 5, 4, "Share (save a copy first)")
-        m.add(0, 6, 5, "More PDF tools")
+        val always = android.view.MenuItem.SHOW_AS_ACTION_ALWAYS
+        m.add(0, 1, 0, "Undo").setIcon(R.drawable.ic_undo).setShowAsAction(always)
+        m.add(0, 2, 1, "Redo").setIcon(R.drawable.ic_redo).setShowAsAction(always)
+        m.add(0, 3, 2, "Save").setIcon(R.drawable.ic_save).setShowAsAction(always)
+        m.add(0, 7, 3, "Save as").setIcon(R.drawable.ic_save_as).setShowAsAction(always)
+        m.add(0, 5, 4, "Share…")
+        m.add(0, 8, 5, "Print")
+        m.add(0, 9, 6, "Night reading").apply { isCheckable = true; isChecked = getSharedPreferences("view", MODE_PRIVATE).getBoolean("night", false) }
+        m.add(0, 4, 7, "Go to page")
+        m.add(0, 6, 8, "More PDF tools")
         toolbar.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> undo()
                 2 -> redo()
-                3 -> if (requireEditable()) saveDialog()
+                3 -> if (requireEditable()) quickSave()
+                7 -> if (requireEditable()) saveAsDialog()
                 4 -> goToPageDialog()
-                5 -> if (dirty) saveDialog() else Storage.sharePdf(this, source)
+                5 -> shareCurrent()
+                8 -> printCurrent()
+                9 -> {
+                    item.isChecked = !item.isChecked
+                    getSharedPreferences("view", MODE_PRIVATE).edit().putBoolean("night", item.isChecked).apply()
+                    doc.nightMode = item.isChecked
+                }
                 6 -> startActivity(Intent(this, ToolsActivity::class.java))
             }
             true
         }
         updateUndoButtons()
+    }
+
+    private fun shareCurrent() {
+        if (dirty) {
+            MaterialAlertDialogBuilder(this)
+                .setTitle("Share with your changes?")
+                .setMessage("Your edits are saved first, then shared.")
+                .setPositiveButton("Save & share") { _, _ -> quickSave(thenShare = true) }
+                .setNegativeButton("Share original") { _, _ -> Ui.share(this, source) }
+                .show()
+        } else Ui.share(this, source)
+    }
+
+    private fun printCurrent() {
+        val p = pdf ?: return
+        if (dirty) Toast.makeText(this, "Printing the last saved version — save to include your edits", Toast.LENGTH_LONG).show()
+        Ui.print(this, p.displayFile, displayName)
     }
 
     private lateinit var toolOptions: View
@@ -731,7 +763,10 @@ class PdfEditorActivity : AppCompatActivity(), PdfDocView.Listener {
         toolButton(bar, "Pages", R.drawable.ic_pages) { setTool(ActiveTool.NONE); openPages() }
         toolButton(bar, "Get text", R.drawable.ic_ocr) { setTool(ActiveTool.NONE); extractText() }
         toolButton(bar, "Go to", R.drawable.ic_pdf) { goToPageDialog() }
-        toolButton(bar, "Save", R.drawable.ic_save) { if (requireEditable()) { setTool(ActiveTool.NONE); saveDialog() } }
+        toolButton(bar, "Save", R.drawable.ic_save) { if (requireEditable()) { setTool(ActiveTool.NONE); quickSave() } }
+        toolButton(bar, "Save as", R.drawable.ic_save_as) { if (requireEditable()) { setTool(ActiveTool.NONE); saveAsDialog() } }
+        toolButton(bar, "Share", R.drawable.ic_share) { setTool(ActiveTool.NONE); shareCurrent() }
+        toolButton(bar, "Print", R.drawable.ic_print) { setTool(ActiveTool.NONE); printCurrent() }
     }
 
     private fun setTool(t: ActiveTool) {
@@ -894,7 +929,7 @@ class PdfEditorActivity : AppCompatActivity(), PdfDocView.Listener {
         MaterialAlertDialogBuilder(this)
             .setTitle("Save changes?")
             .setMessage("You have unsaved changes to this PDF.")
-            .setPositiveButton("Save") { _, _ -> saveDialog() }
+            .setPositiveButton("Save") { _, _ -> quickSave(thenFinish = true) }
             .setNegativeButton("Discard") { _, _ -> finish() }
             .setNeutralButton("Cancel", null)
             .show()
@@ -903,46 +938,106 @@ class PdfEditorActivity : AppCompatActivity(), PdfDocView.Listener {
     // ---------------- saving ----------------
 
     private var organizeAfterSave = false
+    private var shareAfterSave = false
+    private var pendingSaveAs: Pair<String, Boolean>? = null
 
-    private fun saveDialog(thenOrganize: Boolean = false) {
+    private val createDoc = registerForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
+        val ps = pendingSaveAs ?: return@registerForActivityResult
+        pendingSaveAs = null
+        if (uri == null) return@registerForActivityResult
+        performSave(Storage.uniquePdf(this, ps.first), overwrite = false, flatten = ps.second, export = false, copyTo = uri, showDialog = true)
+    }
+
+    private fun baseName() = displayName.removeSuffix(".pdf").removeSuffix(".PDF")
+
+    private fun inLibrary() = source.parentFile?.absolutePath == Storage.pdfDir(this).absolutePath
+
+    /**
+     * Save: files from the app's library are updated in place; other PDFs (opened from elsewhere)
+     * get a "_signed" copy in the library and Downloads. Editing continues after saving.
+     */
+    private var finishAfterSave = false
+
+    private fun quickSave(thenOrganize: Boolean = false, thenShare: Boolean = false, thenFinish: Boolean = false) {
         organizeAfterSave = thenOrganize
+        shareAfterSave = thenShare
+        finishAfterSave = thenFinish
         commitEdit()
-        val p = pdf ?: return
+        pdf ?: return
         if (!dirty) {
-            Toast.makeText(this, "Nothing changed yet", Toast.LENGTH_SHORT).show()
+            when {
+                thenOrganize -> pdf?.let { organize.launch(OrganizeActivity.intent(this, it.file, displayName)) }
+                thenShare -> Ui.share(this, source)
+                else -> Toast.makeText(this, "No changes to save", Toast.LENGTH_SHORT).show()
+            }
             return
         }
+        if (inLibrary()) performSave(source, overwrite = true, flatten = false, export = false, copyTo = null, showDialog = false)
+        else {
+            val base = baseName().let { if (it.endsWith("_signed")) it else it + "_signed" }
+            performSave(Storage.uniquePdf(this, base), overwrite = false, flatten = false, export = true, copyTo = null, showDialog = false)
+        }
+    }
+
+    // kept for callers that ask to save before another action
+    private fun saveDialog(thenOrganize: Boolean = false) = quickSave(thenOrganize = thenOrganize)
+
+    /** Save as: new name, optional form locking, and where to put it. */
+    private fun saveAsDialog() {
+        commitEdit()
+        val p = pdf ?: return
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val name = EditText(this).apply {
-            val base = displayName.removeSuffix(".pdf").removeSuffix(".PDF")
-            setText(if (base.endsWith("_signed")) base else base + "_signed")
+            setText(baseName().let { if (it.endsWith("_signed") || !dirty) it else it + "_signed" })
             setSelectAllOnFocus(true)
             hint = "File name"
+            maxLines = 1
+            inputType = InputType.TYPE_CLASS_TEXT
         }
         box.addView(name)
-        val flatten = CheckBox(this).apply {
-            text = "Lock form fields (can't be edited later)"
-        }
+        val where = android.widget.RadioGroup(this)
+        val lib = android.widget.RadioButton(this).apply { id = View.generateViewId(); text = "App library + Downloads › PDF ScanSign"; isChecked = true }
+        val pick = android.widget.RadioButton(this).apply { id = View.generateViewId(); text = "Choose a folder…" }
+        where.addView(lib); where.addView(pick)
+        box.addView(TextView(this).apply { text = "Save to"; setPadding(0, (12 * resources.displayMetrics.density).toInt(), 0, 0) })
+        box.addView(where)
+        val flatten = CheckBox(this).apply { text = "Lock form fields (can't be edited later)" }
         if (p.fields.isNotEmpty()) box.addView(flatten)
         MaterialAlertDialogBuilder(this)
-            .setTitle("Save PDF")
+            .setTitle("Save as")
             .setView(padded(box))
-            .setPositiveButton("Save") { _, _ -> save(name.text.toString(), flatten.isChecked) }
+            .setPositiveButton("Save") { _, _ ->
+                val n = Storage.cleanName(name.text.toString())
+                if (where.checkedRadioButtonId == pick.id) {
+                    pendingSaveAs = Pair(n, flatten.isChecked)
+                    try { createDoc.launch("$n.pdf") } catch (e: Exception) { Toast.makeText(this, "No file picker available", Toast.LENGTH_SHORT).show() }
+                } else {
+                    performSave(Storage.uniquePdf(this, n), overwrite = false, flatten = flatten.isChecked, export = true, copyTo = null, showDialog = true)
+                }
+            }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
-    private fun save(name: String, flatten: Boolean) {
+    private fun performSave(target: File, overwrite: Boolean, flatten: Boolean, export: Boolean, copyTo: android.net.Uri?, showDialog: Boolean) {
         val p = pdf ?: return
         doc.select(null)
         setLoading(true, "Saving…")
-        val snapshot = ArrayList(items)
+        val snapshot = items.map { it.copy() }
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
                 try {
-                    val out = Storage.uniquePdf(this@PdfEditorActivity, name)
-                    PdfSaver.save(p, out, snapshot, flatten)
-                    Pair(out, Storage.exportToDownloads(this@PdfEditorActivity, out))
+                    val tmp = if (overwrite) Storage.newWorkFile(this@PdfEditorActivity, "pdf") else target
+                    PdfSaver.save(p, tmp, snapshot, flatten)
+                    if (overwrite) {
+                        // atomic replace; the viewer keeps reading the old file until we reload
+                        if (!tmp.renameTo(target)) { tmp.copyTo(target, overwrite = true); tmp.delete() }
+                    }
+                    val exported = export && Storage.exportToDownloads(this@PdfEditorActivity, target)
+                    val copied = copyTo?.let { uri ->
+                        contentResolver.openOutputStream(uri)?.use { out -> target.inputStream().use { it.copyTo(out) } } != null
+                    } ?: false
+                    Triple(target, exported, copied)
                 } catch (e: Throwable) {
                     null
                 }
@@ -952,25 +1047,52 @@ class PdfEditorActivity : AppCompatActivity(), PdfDocView.Listener {
                 Toast.makeText(this@PdfEditorActivity, "Could not save the PDF", Toast.LENGTH_LONG).show()
                 return@launch
             }
-            dirty = false
-            savedIndex = hIndex
-            val (file, exported) = result
-            if (organizeAfterSave) {
-                organizeAfterSave = false
-                organize.launch(OrganizeActivity.intent(this@PdfEditorActivity, file, file.name))
+            val (file, exported, copied) = result
+            if (finishAfterSave) {
+                Toast.makeText(this@PdfEditorActivity, "Saved", Toast.LENGTH_SHORT).show()
+                dirty = false
+                finish()
                 return@launch
             }
-            MaterialAlertDialogBuilder(this@PdfEditorActivity)
-                .setTitle("Saved")
-                .setMessage(file.name + if (exported) "\n\nA copy is in Downloads › PDF ScanSign." else "")
-                .setPositiveButton("Share") { _, _ -> Storage.sharePdf(this@PdfEditorActivity, file) }
-                .setNeutralButton("Open in another app") { _, _ ->
-                    try { Storage.openPdfExternally(this@PdfEditorActivity, file) } catch (_: Exception) {}
-                }
-                .setNegativeButton("Close") { _, _ -> finish() }
-                .show()
+            reloadFrom(file)
+            when {
+                organizeAfterSave -> { organizeAfterSave = false; organize.launch(OrganizeActivity.intent(this@PdfEditorActivity, file, file.name)) }
+                shareAfterSave -> { shareAfterSave = false; Ui.share(this@PdfEditorActivity, file) }
+                showDialog -> MaterialAlertDialogBuilder(this@PdfEditorActivity)
+                    .setTitle("Saved")
+                    .setMessage(file.name +
+                        (if (copied) "\n\nSaved to the folder you chose." else "") +
+                        (if (exported) "\n\nA copy is in Downloads › PDF ScanSign." else ""))
+                    .setPositiveButton("Share") { _, _ -> Ui.share(this@PdfEditorActivity, file) }
+                    .setNeutralButton("Print") { _, _ -> Ui.print(this@PdfEditorActivity, file) }
+                    .setNegativeButton("Keep editing", null)
+                    .show()
+                else -> Toast.makeText(this@PdfEditorActivity,
+                    if (exported) "Saved · copy in Downloads › PDF ScanSign" else "Saved", Toast.LENGTH_SHORT).show()
+            }
         }
     }
+
+    /** After saving, continue editing the saved file (changes are now part of the PDF). */
+    private fun reloadFrom(file: File) {
+        val page = doc.currentPage()
+        items.clear()
+        history.clear()
+        hIndex = -1
+        savedIndex = 0
+        dirty = false
+        doc.select(null)
+        doc.clearTextSelection()
+        renderer?.close()
+        renderer = null
+        source = file
+        displayName = file.name
+        toolbar.title = displayName
+        restorePage = page
+        open(null)
+    }
+
+    private var restorePage = -1
 
     private fun padded(v: View): View {
         val pad = (22 * resources.displayMetrics.density).toInt()

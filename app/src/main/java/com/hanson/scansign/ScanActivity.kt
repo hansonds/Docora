@@ -43,7 +43,7 @@ object ScanSession {
     val pages = ArrayList<ScanPage>()
 }
 
-class ScanActivity : AppCompatActivity() {
+class ScanActivity : BaseActivity() {
 
     companion object {
         const val EXTRA_START = "start"
@@ -123,7 +123,7 @@ class ScanActivity : AppCompatActivity() {
         list = findViewById(R.id.pages)
         empty = findViewById(R.id.empty)
         progress = findViewById(R.id.progress)
-        list.layoutManager = GridLayoutManager(this, 2)
+        list.layoutManager = GridLayoutManager(this, Ui.columns(this, 170, 2))
         list.adapter = adapter
 
         findViewById<MaterialButton>(R.id.btnCamera).setOnClickListener { openCamera() }
@@ -404,8 +404,7 @@ class ScanActivity : AppCompatActivity() {
                     finish()
                 }
                 .setNeutralButton("Share") { _, _ ->
-                    Storage.sharePdf(this@ScanActivity, file)
-                    finish()
+                    Ui.share(this@ScanActivity, file)
                 }
                 .setNegativeButton("Done") { _, _ -> finish() }
                 .setOnCancelListener { finish() }

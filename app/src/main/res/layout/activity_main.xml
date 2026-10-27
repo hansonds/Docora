@@ -18,13 +18,16 @@
         android:fillViewport="true">
 
         <LinearLayout
+            android:id="@+id/content"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
             android:orientation="vertical"
             android:paddingHorizontal="16dp"
             android:paddingBottom="24dp">
 
             <LinearLayout
+                android:id="@+id/hero"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
@@ -45,7 +48,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
                     android:alpha="0.85"
-                    android:text="Auto edge detection · signatures · forms · works offline"
+                    android:text="AI scanner · signatures · forms · OCR · all free"
                     android:textColor="#FFFFFF"
                     android:textSize="13sp" />
 

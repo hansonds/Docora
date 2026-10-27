@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/sc_scan"
+        android:shortcutId="scan"
+        android:shortcutLongLabel="@string/sc_scan_long"
+        android:shortcutShortLabel="@string/sc_scan">
+        <intent
+            android:action="com.hanson.scansign.action.SCAN"
+            android:targetClass="com.hanson.scansign.MainActivity"
+            android:targetPackage="com.hanson.scansign" />
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/sc_open"
+        android:shortcutId="open"
+        android:shortcutLongLabel="@string/sc_open_long"
+        android:shortcutShortLabel="@string/sc_open">
+        <intent
+            android:action="com.hanson.scansign.action.OPEN"
+            android:targetClass="com.hanson.scansign.MainActivity"
+            android:targetPackage="com.hanson.scansign" />
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/sc_tools"
+        android:shortcutId="tools"
+        android:shortcutLongLabel="@string/sc_tools_long"
+        android:shortcutShortLabel="@string/sc_tools">
+        <intent
+            android:action="com.hanson.scansign.action.TOOLS"
+            android:targetClass="com.hanson.scansign.MainActivity"
+            android:targetPackage="com.hanson.scansign" />
+    </shortcut>
+</shortcuts>

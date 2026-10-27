@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">PDF ScanSign</string>
+    <string name="sc_scan">Scan</string>
+    <string name="sc_scan_long">Scan a document</string>
+    <string name="sc_open">Open PDF</string>
+    <string name="sc_open_long">Open and sign a PDF</string>
+    <string name="sc_tools">PDF Tools</string>
+    <string name="sc_tools_long">Merge, split, compress…</string>
 </resources>

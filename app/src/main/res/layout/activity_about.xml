@@ -18,6 +18,8 @@
         android:layout_height="match_parent">
 
         <LinearLayout
+            android:id="@+id/content"
+            android:layout_gravity="center_horizontal"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center_horizontal"
@@ -105,7 +107,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
                         android:lineSpacingMultiplier="1.35"
-                        android:text="Everything is free — no ads, no watermark, no account, works offline.\n\nSCAN\n• AI scanner (Google on-device): edge detection, auto capture, removes shadows, stains and fingers\n• Built-in camera with live edge detection\n• Filters, multi-page, ID card (2 sides on one page)\n• Searchable PDFs (OCR)\n\nEDIT\n• Sign, text, draw, highlight, shapes, whiteout, images, stamps\n• Fill PDF forms, undo / redo\n• Open any PDF: large, password-protected or damaged\n\nTOOLS\n• Merge, split, extract, organize pages\n• Compress, PDF to JPG, images to PDF\n• Extract text (OCR), make searchable\n• Lock / unlock with password\n• Watermark, page numbers" />
+                        android:text="Everything is free — no ads, no watermark, no account, works offline.\n\nSCAN\n• AI scanner (Google on-device): edge detection, auto capture, removes shadows, stains and fingers\n• Built-in camera with live edge detection\n• Filters, multi-page, ID card (2 sides on one page)\n• Searchable PDFs (OCR)\n\nEDIT\n• Sign (photo or finger-drawn), text, draw, highlight, shapes, whiteout, images, stamps — rotate and resize\n• Fill PDF forms, select &amp; copy text, undo / redo\n• Save, Save as (any folder), share with compression, print, night reading\n• Open any PDF: large, password-protected or damaged\n\nTOOLS\n• Merge, split, extract, organize pages\n• Compress, PDF to JPG, images to PDF\n• Extract text (OCR), make searchable\n• Lock / unlock with password\n• Watermark, page numbers\n\nLOOK\n• Light, dark or system theme, 7 colours, pure black mode\n• Phones and tablets" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 

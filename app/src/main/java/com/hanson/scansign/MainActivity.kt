@@ -35,7 +35,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : BaseActivity() {
 
     private lateinit var list: RecyclerView
     private lateinit var empty: TextView
@@ -66,6 +66,13 @@ class MainActivity : AppCompatActivity() {
             true
         }
 
+        Ui.limitWidth(findViewById(R.id.content), 720)
+        findViewById<View>(R.id.hero).background = Themes.heroBackground(this)
+        findViewById<MaterialButton>(R.id.btnScan).apply {
+            val c = ContextCompat.getColor(this@MainActivity, Themes.accent(this@MainActivity).hero1)
+            setTextColor(c)
+            iconTint = ColorStateList.valueOf(c)
+        }
         list = findViewById(R.id.list)
         empty = findViewById(R.id.empty)
         count = findViewById(R.id.count)
@@ -131,6 +138,11 @@ class MainActivity : AppCompatActivity() {
     /** PDFs opened or shared from other apps go straight to the editor. */
     private fun handleIncoming(i: Intent?) {
         i ?: return
+        when (i.action) {
+            "com.hanson.scansign.action.SCAN" -> { startActivity(ScanActivity.intent(this, ScanActivity.START_CAMERA)); return }
+            "com.hanson.scansign.action.OPEN" -> { openPdf.launch(arrayOf("application/pdf")); return }
+            "com.hanson.scansign.action.TOOLS" -> { startActivity(Intent(this, ToolsActivity::class.java)); return }
+        }
         val uri: Uri? = when (i.action) {
             Intent.ACTION_VIEW -> i.data
             Intent.ACTION_SEND -> if (Build.VERSION.SDK_INT >= 33)
@@ -209,13 +221,15 @@ class MainActivity : AppCompatActivity() {
         val menu = PopupMenu(this, anchor)
         menu.menu.add(0, 1, 0, "Open & edit")
         menu.menu.add(0, 2, 1, "Share")
+        menu.menu.add(0, 6, 2, "Print")
         menu.menu.add(0, 3, 2, "Open in another app")
         menu.menu.add(0, 4, 3, "Rename")
         menu.menu.add(0, 5, 4, "Delete")
         menu.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> startActivity(PdfEditorActivity.intent(this, f))
-                2 -> Storage.sharePdf(this, f)
+                2 -> Ui.share(this, f)
+                6 -> Ui.print(this, f)
                 3 -> try {
                     Storage.openPdfExternally(this, f)
                 } catch (e: Exception) {

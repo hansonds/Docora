@@ -24,7 +24,9 @@ Everything is free: no ads, no watermark, no account, works offline.
 - Lock with password (AES), Remove password
 - Watermark, Page numbers
 
-**Library**: search, sort, share, rename. Saved PDFs also go to **Downloads › PDF ScanSign**.
+**More**: Save / Save as (choose any folder), share with optional compression, print, night reading mode, finger-drawn signatures, launcher shortcuts (Scan / Open PDF / Tools), themes (light / dark / system, 7 colours, pure black), tablet layouts.
+
+**Library**: search, sort, share, print, rename. Saved PDFs also go to **Downloads › PDF ScanSign**.
 
 ## Building (GitHub does it for you)
 

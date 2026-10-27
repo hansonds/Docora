@@ -27,7 +27,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /** Hub for all PDF tools (all free). */
-class ToolsActivity : AppCompatActivity() {
+class ToolsActivity : BaseActivity() {
 
     enum class Tool(val title: String, val sub: String, val icon: Int, val bg: Int, val fg: Int, val section: String) {
         SIGN("Sign & edit", "Sign, text, draw, stamps", R.drawable.ic_sign, R.color.icon_tile_4, R.color.brand_purple, "Edit"),
@@ -63,7 +63,14 @@ class ToolsActivity : AppCompatActivity() {
         setContentView(R.layout.activity_tools)
         findViewById<MaterialToolbar>(R.id.toolbar).setNavigationOnClickListener { finish() }
         val container = findViewById<LinearLayout>(R.id.container)
+        Ui.limitWidth(container, 960)
         val d = resources.displayMetrics.density
+        val cols = when {
+            Ui.widthDp(this) >= 840 -> 4
+            Ui.widthDp(this) >= 600 -> 3
+            else -> 2
+        }
+        val gap = (12 * d).toInt()
         for ((section, tools) in Tool.values().groupBy { it.section }) {
             val header = TextView(this).apply {
                 text = section
@@ -71,15 +78,16 @@ class ToolsActivity : AppCompatActivity() {
                 setPadding(0, (18 * d).toInt(), 0, (8 * d).toInt())
             }
             container.addView(header)
-            for (row in tools.chunked(2)) {
+            for (row in tools.chunked(cols)) {
                 val line = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
                 container.addView(line, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                    bottomMargin = (12 * d).toInt()
+                    bottomMargin = gap
                 })
+                // a short last row stretches its tiles so there is no empty gap
                 row.forEachIndexed { i, t ->
                     val tile = LayoutInflater.from(this).inflate(R.layout.tile_action, line, false)
-                    val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                    if (i == 0) lp.marginEnd = (6 * d).toInt() else lp.marginStart = (6 * d).toInt()
+                    val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
+                    if (i > 0) lp.marginStart = gap
                     tile.layoutParams = lp
                     tile.findViewById<View>(R.id.iconBox).backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(this, t.bg))
                     tile.findViewById<ImageView>(R.id.icon).apply {
@@ -91,7 +99,6 @@ class ToolsActivity : AppCompatActivity() {
                     tile.setOnClickListener { start(t) }
                     line.addView(tile)
                 }
-                if (row.size == 1) line.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f).apply { marginStart = (6 * d).toInt() })
             }
         }
     }
