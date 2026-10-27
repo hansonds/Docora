@@ -3,6 +3,10 @@ name: Build APK
 on:
   push:
     branches: [ main, master, dev ]
+    paths-ignore:
+      - 'docs/**'
+      - 'playstore/**'
+      - '**.md'
   workflow_dispatch:
 
 permissions:
