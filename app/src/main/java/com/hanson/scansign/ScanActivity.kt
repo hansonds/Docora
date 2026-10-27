@@ -18,7 +18,11 @@ import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.PickVisualMediaRequest
+import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -146,6 +150,20 @@ class ScanActivity : AppCompatActivity() {
         outState.putInt(STATE_EDIT_INDEX, editIndex)
     }
 
+    override fun onCreateOptionsMenu(menu: android.view.Menu): Boolean {
+        menu.add(0, 7, 0, "Get text").setIcon(R.drawable.ic_ocr).setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean {
+        if (item.itemId == 7) {
+            if (ScanSession.pages.isEmpty()) Toast.makeText(this, "Scan some pages first", Toast.LENGTH_SHORT).show()
+            else startActivity(TextResultActivity.forImages(this, ScanSession.pages.map { it.page }, "Scan"))
+            return true
+        }
+        return super.onOptionsItemSelected(item)
+    }
+
     override fun onSupportNavigateUp(): Boolean {
         confirmLeave()
         return true
@@ -166,7 +184,42 @@ class ScanActivity : AppCompatActivity() {
     }
 
     private fun openCamera() {
-        cameraLauncher.launch(CameraActivity.intent(this, CameraActivity.MODE_DOC, ScanSession.pages.size))
+        if (Settings.useAiScanner(this)) openAiScanner()
+        else cameraLauncher.launch(CameraActivity.intent(this, CameraActivity.MODE_DOC, ScanSession.pages.size))
+    }
+
+    // ---- Google ML Kit document scanner (on-device AI) ----
+
+    private val aiLauncher = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { res ->
+        if (res.resultCode != Activity.RESULT_OK) return@registerForActivityResult
+        val result = GmsDocumentScanningResult.fromActivityResultIntent(res.data) ?: return@registerForActivityResult
+        val uris = result.pages?.map { it.imageUri } ?: emptyList()
+        if (uris.isEmpty()) return@registerForActivityResult
+        progress.visibility = View.VISIBLE
+        lifecycleScope.launch {
+            val files = withContext(Dispatchers.IO) { uris.mapNotNull { Storage.copyUriToWork(this@ScanActivity, it, "jpg") } }
+            progress.visibility = View.GONE
+            for (f in files) ScanSession.pages.add(ScanPage(f, f))
+            adapter.notifyDataSetChanged()
+            list.scrollToPosition(ScanSession.pages.size - 1)
+            refreshEmpty()
+        }
+    }
+
+    private fun openAiScanner() {
+        val options = GmsDocumentScannerOptions.Builder()
+            .setGalleryImportAllowed(true)
+            .setPageLimit(100)
+            .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
+            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+            .build()
+        GmsDocumentScanning.getClient(options).getStartScanIntent(this)
+            .addOnSuccessListener { sender -> aiLauncher.launch(IntentSenderRequest.Builder(sender).build()) }
+            .addOnFailureListener {
+                // no Google Play services / unsupported device: use the built-in camera
+                Toast.makeText(this, "AI scanner not available on this phone — using the built-in camera", Toast.LENGTH_LONG).show()
+                cameraLauncher.launch(CameraActivity.intent(this, CameraActivity.MODE_DOC, ScanSession.pages.size))
+            }
     }
 
     private fun openGallery() {
@@ -274,6 +327,14 @@ class ScanActivity : AppCompatActivity() {
         val sizeGroup = view.findViewById<RadioGroup>(R.id.size)
         val qualityGroup = view.findViewById<RadioGroup>(R.id.quality)
         val margin = view.findViewById<CheckBox>(R.id.margin)
+        val layoutGroup = view.findViewById<RadioGroup>(R.id.layout)
+        val searchable = view.findViewById<CheckBox>(R.id.searchable)
+        searchable.isChecked = Settings.searchableDefault(this)
+        for (l in Layout.values()) {
+            val rb = RadioButton(this).apply { id = View.generateViewId(); text = l.label; tag = l }
+            layoutGroup.addView(rb)
+            if (l == Layout.NORMAL) rb.isChecked = true
+        }
         name.setText(Storage.defaultName())
 
         val prefs = getSharedPreferences("scan", MODE_PRIVATE)
@@ -303,20 +364,21 @@ class ScanActivity : AppCompatActivity() {
                     .putString("quality", quality.name)
                     .putBoolean("margin", margin.isChecked)
                     .apply()
-                savePdf(name.text.toString(), size, quality, margin.isChecked)
+                val layout = layoutGroup.findViewById<RadioButton>(layoutGroup.checkedRadioButtonId)?.tag as? Layout ?: Layout.NORMAL
+                savePdf(name.text.toString(), size, quality, margin.isChecked, layout, searchable.isChecked)
             }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
-    private fun savePdf(name: String, size: PageSize, quality: Quality, margin: Boolean) {
+    private fun savePdf(name: String, size: PageSize, quality: Quality, margin: Boolean, layout: Layout, searchable: Boolean) {
         progress.visibility = View.VISIBLE
         val images = ScanSession.pages.map { it.page }
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
                 try {
                     val out = Storage.uniquePdf(this@ScanActivity, name)
-                    PdfTools.imagesToPdf(images, out, size, quality, margin)
+                    PdfTools.imagesToPdf(this@ScanActivity, images, out, size, quality, margin, layout, searchable)
                     val exported = Storage.exportToDownloads(this@ScanActivity, out)
                     Pair(out, exported)
                 } catch (e: Throwable) {

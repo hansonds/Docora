@@ -11,6 +11,10 @@ import android.graphics.Typeface
 object TextRender {
     const val ASCENT = 0.95f
     const val LINE = 1.2f
+    /** Padding inside a stamp frame, as a fraction of the font size. */
+    const val PAD = 0.4f
+    /** Stamp frame line width, as a fraction of the font size. */
+    const val FRAME = 0.12f
 
     fun typeface(font: TextFont, bold: Boolean): Typeface {
         val family = when (font) {
@@ -35,6 +39,10 @@ object TextRender {
         val ls = lines(item.text)
         val w = ls.maxOf { p.measureText(it) }.coerceAtLeast(item.sizePt * 0.6f)
         val h = ls.size * LINE * item.sizePt
+        if (item.boxed) {
+            val pad = 2 * PAD * item.sizePt
+            return Pair(w + pad, h + pad)
+        }
         return Pair(w, h)
     }
 
@@ -42,8 +50,23 @@ object TextRender {
     fun draw(canvas: Canvas, item: TextItem, left: Float, top: Float, pxPerPt: Float) {
         val p = paint(item, pxPerPt)
         val size = item.sizePt * pxPerPt
+        var l = left
+        var t = top
+        if (item.boxed) {
+            val (wPt, hPt) = sizePt(item)
+            val frame = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE; color = item.color; strokeWidth = FRAME * size
+            }
+            val half = frame.strokeWidth / 2
+            canvas.drawRoundRect(
+                left + half, top + half, left + wPt * pxPerPt - half, top + hPt * pxPerPt - half,
+                size * 0.3f, size * 0.3f, frame
+            )
+            l += PAD * size
+            t += PAD * size
+        }
         lines(item.text).forEachIndexed { k, line ->
-            canvas.drawText(line, left, top + size * (ASCENT + LINE * k), p)
+            canvas.drawText(line, l, t + size * (ASCENT + LINE * k), p)
         }
     }
 }

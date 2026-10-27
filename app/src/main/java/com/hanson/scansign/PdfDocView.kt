@@ -48,7 +48,20 @@ class PdfDocView @JvmOverloads constructor(
         fun onViewportChanged() {}
         /** Any tap on the document (before it is handled). */
         fun onAnyTap() {}
+        /** A pen stroke or shape was just drawn. */
+        fun onItemAdded(item: EditItem) {}
     }
+
+    /** Current drawing tool. [None] = select / move / pan. */
+    sealed class Tool {
+        object None : Tool()
+        class Pen(val color: Int, val widthPt: Float, val alpha: Float) : Tool()
+        class Shape(val kind: ShapeKind, val color: Int, val widthPt: Float) : Tool()
+    }
+
+    var tool: Tool = Tool.None
+        set(v) { field = v; if (v != Tool.None) select(null) }
+    private var drawing: EditItem? = null
 
     var listener: Listener? = null
 
@@ -146,7 +159,7 @@ class PdfDocView @JvmOverloads constructor(
     private val handleR = 12 * density
 
     // ---- gestures ----
-    private enum class Mode { NONE, PAN, ITEM_MOVE, ITEM_RESIZE, SCROLLBAR }
+    private enum class Mode { NONE, PAN, ITEM_MOVE, ITEM_RESIZE, SCROLLBAR, DRAW }
     private var mode = Mode.NONE
     private var lastX = 0f
     private var lastY = 0f
@@ -186,11 +199,12 @@ class PdfDocView @JvmOverloads constructor(
         }
 
         override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-            handleTap(e.x, e.y)
+            if (tool == Tool.None) handleTap(e.x, e.y)
             return true
         }
 
         override fun onDoubleTap(e: MotionEvent): Boolean {
+            if (tool != Tool.None) return false
             animateZoom(if (zoom < 1.8f) 2.5f else 1f, e.x, e.y)
             return true
         }
@@ -542,29 +556,41 @@ class PdfDocView @JvmOverloads constructor(
     private fun itemRect(item: EditItem): RectF? {
         if (item.page !in geoms.indices) return null
         val pr = pageScreenRect(item.page)
-        return when (item) {
-            is SignatureItem -> RectF(
-                pr.left + item.fx * pr.width(), pr.top + item.fy * pr.height(),
-                pr.left + (item.fx + item.fw) * pr.width(), pr.top + (item.fy + item.fh) * pr.height()
-            )
-            is TextItem -> {
-                val (wPt, hPt) = TextRender.sizePt(item)
-                val s = pxPerPt(item.page)
-                val l = pr.left + item.fx * pr.width()
-                val t = pr.top + item.fy * pr.height()
-                RectF(l, t, l + wPt * s, t + hPt * s)
-            }
-        }
+        val g = geoms[item.page]
+        val f = ItemRender.bounds(item, g.dispW, g.dispH)
+        return RectF(pr.left + f.left * pr.width(), pr.top + f.top * pr.height(),
+            pr.left + f.right * pr.width(), pr.top + f.bottom * pr.height())
     }
 
     private fun drawItems(canvas: Canvas, page: Int, pr: RectF) {
+        val s = pxPerPt(page)
         for (item in items) {
             if (item.page != page) continue
-            val r = itemRect(item) ?: continue
-            when (item) {
-                is SignatureItem -> sigBitmap(item)?.let { canvas.drawBitmap(it, null, r, bmpPaint) }
-                is TextItem -> TextRender.draw(canvas, item, r.left, r.top, pxPerPt(page))
+            ItemRender.draw(canvas, item, pr, s, { sigBitmap(it) }, item === selected)
+        }
+    }
+
+    /** Precise hit test: thin items (pen strokes, lines) only respond near the stroke. */
+    private fun hits(item: EditItem, x: Float, y: Float): Boolean {
+        val r = itemRect(item) ?: return false
+        val slop = 14 * density
+        val grow = RectF(r)
+        grow.inset(-slop / 2, -slop / 2)
+        if (!grow.contains(x, y)) return false
+        val pr = pageScreenRect(item.page)
+        fun sp(p: PointF) = PointF(pr.left + p.x * pr.width(), pr.top + p.y * pr.height())
+        val touch = PointF(x, y)
+        return when (item) {
+            is InkItem -> {
+                if (item.points.size < 2) true
+                else (1 until item.points.size).any {
+                    ItemRender.distToSegment(touch, sp(item.points[it - 1]), sp(item.points[it])) < slop
+                }
             }
+            is ShapeItem -> if (item.isLine) {
+                ItemRender.distToSegment(touch, sp(PointF(item.fx, item.fy)), sp(PointF(item.fx + item.fw, item.fy + item.fh))) < slop
+            } else true
+            else -> true
         }
     }
 
@@ -651,10 +677,19 @@ class PdfDocView @JvmOverloads constructor(
             zoomAnimator?.cancel()
             lastX = e.x; lastY = e.y
             mode = pickMode(e.x, e.y)
+            if (mode == Mode.PAN && tool != Tool.None && startDrawing(e.x, e.y)) mode = Mode.DRAW
             if (mode != Mode.PAN) parent?.requestDisallowInterceptTouchEvent(true)
+        }
+        if (e.actionMasked == MotionEvent.ACTION_POINTER_DOWN && mode == Mode.DRAW) {
+            // second finger: cancel the stroke and pan / zoom instead
+            drawing?.let { items.remove(it) }
+            drawing = null
+            mode = Mode.PAN
+            invalidate()
         }
 
         scaleDetector.onTouchEvent(e)
+        gestureDetector.onTouchEvent(e)
 
         when (mode) {
             Mode.SCROLLBAR -> {
@@ -669,13 +704,14 @@ class PdfDocView @JvmOverloads constructor(
                     dragSelected(e.x - lastX, e.y - lastY)
                 }
             }
-            Mode.PAN -> gestureDetector.onTouchEvent(e)
-            Mode.NONE -> {}
+            Mode.DRAW -> if (e.actionMasked == MotionEvent.ACTION_MOVE) continueDrawing(e)
+            Mode.PAN, Mode.NONE -> {}
         }
         lastX = e.x; lastY = e.y
 
         if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) {
             if (mode == Mode.ITEM_MOVE || mode == Mode.ITEM_RESIZE) listener?.onItemsChanged()
+            if (mode == Mode.DRAW) finishDrawing()
             if (mode == Mode.SCROLLBAR) scrollbarVisibleUntil = System.currentTimeMillis() + 1200
             mode = Mode.NONE
             invalidate()
@@ -715,10 +751,12 @@ class PdfDocView @JvmOverloads constructor(
         when (mode) {
             Mode.ITEM_MOVE -> {
                 val r = itemRect(s) ?: return
-                val fw = r.width() / pr.width()
-                val fh = r.height() / pr.height()
-                s.fx = (s.fx + dx / pr.width()).coerceIn(-fw * 0.5f, 1f - fw * 0.5f)
-                s.fy = (s.fy + dy / pr.height()).coerceIn(-fh * 0.5f, 1f - fh * 0.5f)
+                // keep at least half of the item on the page
+                val l = (r.left - pr.left) / pr.width(); val t = (r.top - pr.top) / pr.height()
+                val fw = r.width() / pr.width(); val fh = r.height() / pr.height()
+                val ddx = (dx / pr.width()).coerceIn(-fw * 0.5f - l, 1f - fw * 0.5f - l)
+                val ddy = (dy / pr.height()).coerceIn(-fh * 0.5f - t, 1f - fh * 0.5f - t)
+                ItemRender.moveBy(s, ddx, ddy)
             }
             Mode.ITEM_RESIZE -> {
                 val r = itemRect(s) ?: return
@@ -731,15 +769,66 @@ class PdfDocView @JvmOverloads constructor(
     }
 
     private fun scaleItem(s: EditItem, factor: Float) {
-        when (s) {
-            is SignatureItem -> {
-                val ratio = s.fh / s.fw
-                val nw = (s.fw * factor).coerceIn(0.03f, 1.5f)
-                s.fw = nw
-                s.fh = nw * ratio
-            }
-            is TextItem -> s.sizePt = (s.sizePt * factor).coerceIn(4f, 200f)
+        ItemRender.scaleBy(s, factor)
+        invalidate()
+    }
+
+    // ---- drawing tools ----
+
+    private fun pageAt(x: Float, y: Float): Int? {
+        for (i in visibleRange()) if (pageScreenRect(i).contains(x, y)) return i
+        return null
+    }
+
+    private fun toFrac(page: Int, x: Float, y: Float): PointF {
+        val pr = pageScreenRect(page)
+        return PointF(((x - pr.left) / pr.width()).coerceIn(0f, 1f), ((y - pr.top) / pr.height()).coerceIn(0f, 1f))
+    }
+
+    private fun startDrawing(x: Float, y: Float): Boolean {
+        val page = pageAt(x, y) ?: return false
+        val p = toFrac(page, x, y)
+        val item: EditItem = when (val t = tool) {
+            is Tool.Pen -> InkItem(page, mutableListOf(p), t.color, t.widthPt, t.alpha)
+            is Tool.Shape -> ShapeItem(page, t.kind, p.x, p.y, 0f, 0f, t.color, t.widthPt)
+            Tool.None -> return false
         }
+        drawing = item
+        items.add(item)
+        invalidate()
+        return true
+    }
+
+    private fun continueDrawing(e: MotionEvent) {
+        val d = drawing ?: return
+        val p = toFrac(d.page, e.x, e.y)
+        when (d) {
+            is InkItem -> {
+                val last = d.points.last()
+                val pr = pageScreenRect(d.page)
+                if (hypot((p.x - last.x) * pr.width(), (p.y - last.y) * pr.height()) > 1.5f * density) d.points.add(p)
+            }
+            is ShapeItem -> { d.fw = p.x - d.fx; d.fh = p.y - d.fy }
+            else -> {}
+        }
+        invalidate()
+    }
+
+    private fun finishDrawing() {
+        val d = drawing ?: return
+        drawing = null
+        if (d is ShapeItem && !d.isLine) {
+            // normalise to a positive box
+            if (d.fw < 0) { d.fx += d.fw; d.fw = -d.fw }
+            if (d.fh < 0) { d.fy += d.fh; d.fh = -d.fh }
+        }
+        val pr = pageScreenRect(d.page)
+        val tiny = when (d) {
+            is ShapeItem -> hypot(d.fw * pr.width(), d.fh * pr.height()) < 8 * density
+            else -> false
+        }
+        if (tiny) { items.remove(d); invalidate(); return }
+        listener?.onItemAdded(d)
         invalidate()
     }
 
@@ -754,10 +843,7 @@ class PdfDocView @JvmOverloads constructor(
         listener?.onAnyTap()
         // items first (topmost last in list)
         for (item in items.asReversed()) {
-            val r = itemRect(item) ?: continue
-            val grow = RectF(r)
-            grow.inset(-6 * density, -6 * density)
-            if (grow.contains(x, y)) {
+            if (hits(item, x, y)) {
                 if (item === selected) listener?.onItemTapped(item) else select(item)
                 return
             }

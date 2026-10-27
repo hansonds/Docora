@@ -8,7 +8,10 @@ import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.pdmodel.font.PDFont
 import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
+import com.tom_roush.pdfbox.pdmodel.graphics.image.JPEGFactory
 import com.tom_roush.pdfbox.pdmodel.graphics.image.LosslessFactory
+import com.tom_roush.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState
+import android.graphics.PointF
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import com.tom_roush.pdfbox.pdmodel.interactive.form.PDCheckBox
 import com.tom_roush.pdfbox.pdmodel.interactive.form.PDChoice
@@ -35,12 +38,12 @@ object PdfSaver {
                     for (item in pageItems) {
                         when (item) {
                             is SignatureItem -> {
-                                val img = images.getOrPut(item.file.absolutePath) {
-                                    LosslessFactory.createFromImage(doc, BitmapFactory.decodeFile(item.file.absolutePath))
-                                }
+                                val img = images.getOrPut(item.file.absolutePath) { loadImage(doc, item.file) }
                                 cs.drawImage(img, boxMatrix(g, item.fx, item.fy, item.fw, item.fh))
                             }
                             is TextItem -> drawText(doc, cs, g, item)
+                            is InkItem -> drawInk(cs, g, item)
+                            is ShapeItem -> drawShape(cs, g, item)
                         }
                     }
                 }
@@ -86,6 +89,124 @@ object PdfSaver {
         if (needAppearances) try { form.needAppearances = true } catch (_: Throwable) {}
     }
 
+    /** Photos are stored as JPEG (small), signatures / transparent PNGs losslessly. */
+    private fun loadImage(doc: PDDocument, f: File): PDImageXObject {
+        val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(f.absolutePath, o)
+        var sample = 1
+        while (kotlin.math.max(o.outWidth, o.outHeight) / (sample * 2) >= 2400) sample *= 2
+        val bmp = BitmapFactory.decodeFile(f.absolutePath, BitmapFactory.Options().apply { inSampleSize = sample })
+        val isJpeg = f.name.endsWith(".jpg", true) || f.name.endsWith(".jpeg", true)
+        return if (isJpeg && !bmp.hasAlpha()) JPEGFactory.createFromImage(doc, bmp, 0.88f)
+        else LosslessFactory.createFromImage(doc, bmp)
+    }
+
+    private fun alphaState(alpha: Float): PDExtendedGraphicsState = PDExtendedGraphicsState().apply {
+        strokingAlphaConstant = alpha
+        nonStrokingAlphaConstant = alpha
+    }
+
+    private fun rgb(c: Int) = floatArrayOf(Color.red(c) / 255f, Color.green(c) / 255f, Color.blue(c) / 255f)
+
+    /** Displayed-page fraction -> PDF user space. */
+    private fun up(g: PageGeom, fx: Float, fy: Float): PointF = g.toUser(fx * g.dispW, fy * g.dispH)
+
+    private fun drawInk(cs: PDPageContentStream, g: PageGeom, item: InkItem) {
+        if (item.points.isEmpty()) return
+        val c = rgb(item.color)
+        cs.saveGraphicsState()
+        if (item.alpha < 1f) cs.setGraphicsStateParameters(alphaState(item.alpha))
+        cs.setStrokingColor(c[0], c[1], c[2])
+        cs.setNonStrokingColor(c[0], c[1], c[2])
+        cs.setLineWidth(item.widthPt)
+        cs.setLineCapStyle(1)
+        cs.setLineJoinStyle(1)
+        val pts = item.points.map { up(g, it.x, it.y) }
+        if (pts.size == 1) {
+            circle(cs, pts[0].x, pts[0].y, item.widthPt / 2)
+            cs.fill()
+        } else {
+            cs.moveTo(pts[0].x, pts[0].y)
+            // smooth like the preview: quadratic through midpoints
+            for (i in 1 until pts.size) {
+                val a = pts[i - 1]; val b = pts[i]
+                val mx = (a.x + b.x) / 2; val my = (a.y + b.y) / 2
+                val prev = if (i == 1) pts[0] else PointF((pts[i - 2].x + a.x) / 2, (pts[i - 2].y + a.y) / 2)
+                // quadratic (prev -> a -> mid) as cubic
+                cs.curveTo(prev.x + 2f / 3 * (a.x - prev.x), prev.y + 2f / 3 * (a.y - prev.y),
+                    mx + 2f / 3 * (a.x - mx), my + 2f / 3 * (a.y - my), mx, my)
+            }
+            cs.lineTo(pts.last().x, pts.last().y)
+            cs.stroke()
+        }
+        cs.restoreGraphicsState()
+    }
+
+    private fun circle(cs: PDPageContentStream, cx: Float, cy: Float, r: Float) {
+        val k = 0.5523f * r
+        cs.moveTo(cx + r, cy)
+        cs.curveTo(cx + r, cy + k, cx + k, cy + r, cx, cy + r)
+        cs.curveTo(cx - k, cy + r, cx - r, cy + k, cx - r, cy)
+        cs.curveTo(cx - r, cy - k, cx - k, cy - r, cx, cy - r)
+        cs.curveTo(cx + k, cy - r, cx + r, cy - k, cx + r, cy)
+        cs.closePath()
+    }
+
+    private fun drawShape(cs: PDPageContentStream, g: PageGeom, s: ShapeItem) {
+        val c = rgb(s.color)
+        cs.saveGraphicsState()
+        cs.setStrokingColor(c[0], c[1], c[2])
+        cs.setNonStrokingColor(c[0], c[1], c[2])
+        cs.setLineWidth(s.widthPt)
+        cs.setLineCapStyle(1)
+        cs.setLineJoinStyle(if (s.kind == ShapeKind.RECT) 0 else 1)
+        val x0 = s.fx; val y0 = s.fy; val x1 = s.fx + s.fw; val y1 = s.fy + s.fh
+        fun quad() {
+            val a = up(g, x0, y0); val b = up(g, x1, y0); val cc = up(g, x1, y1); val d = up(g, x0, y1)
+            cs.moveTo(a.x, a.y); cs.lineTo(b.x, b.y); cs.lineTo(cc.x, cc.y); cs.lineTo(d.x, d.y); cs.closePath()
+        }
+        when (s.kind) {
+            ShapeKind.RECT -> { quad(); cs.stroke() }
+            ShapeKind.WHITEOUT -> { cs.setNonStrokingColor(1f, 1f, 1f); quad(); cs.fill() }
+            ShapeKind.HIGHLIGHT -> { cs.setGraphicsStateParameters(alphaState(0.35f)); quad(); cs.fill() }
+            ShapeKind.ELLIPSE -> {
+                // bezier ellipse in page fractions, each point mapped (works on rotated pages)
+                val cx = (x0 + x1) / 2; val cy = (y0 + y1) / 2
+                val rx = (x1 - x0) / 2; val ry = (y1 - y0) / 2
+                val k = 0.5523f
+                fun P(x: Float, y: Float) = up(g, x, y)
+                val p0 = P(cx + rx, cy)
+                cs.moveTo(p0.x, p0.y)
+                val segs = arrayOf(
+                    floatArrayOf(cx + rx, cy + k * ry, cx + k * rx, cy + ry, cx, cy + ry),
+                    floatArrayOf(cx - k * rx, cy + ry, cx - rx, cy + k * ry, cx - rx, cy),
+                    floatArrayOf(cx - rx, cy - k * ry, cx - k * rx, cy - ry, cx, cy - ry),
+                    floatArrayOf(cx + k * rx, cy - ry, cx + rx, cy - k * ry, cx + rx, cy)
+                )
+                for (sg in segs) {
+                    val a = P(sg[0], sg[1]); val b = P(sg[2], sg[3]); val e = P(sg[4], sg[5])
+                    cs.curveTo(a.x, a.y, b.x, b.y, e.x, e.y)
+                }
+                cs.closePath()
+                cs.stroke()
+            }
+            ShapeKind.LINE, ShapeKind.ARROW -> {
+                val a = up(g, x0, y0); val b = up(g, x1, y1)
+                cs.moveTo(a.x, a.y); cs.lineTo(b.x, b.y); cs.stroke()
+                if (s.kind == ShapeKind.ARROW) {
+                    // head computed in displayed points then mapped
+                    val h = ItemRender.arrowHead(x0 * g.dispW, y0 * g.dispH, x1 * g.dispW, y1 * g.dispH,
+                        kotlin.math.max(10f, s.widthPt * 4))
+                    val h1 = g.toUser(h[0], h[1]); val h2 = g.toUser(h[2], h[3])
+                    cs.moveTo(b.x, b.y); cs.lineTo(h1.x, h1.y)
+                    cs.moveTo(b.x, b.y); cs.lineTo(h2.x, h2.y)
+                    cs.stroke()
+                }
+            }
+        }
+        cs.restoreGraphicsState()
+    }
+
     /** Matrix that maps the unit square onto a box given in displayed-page fractions. */
     private fun boxMatrix(g: PageGeom, fx: Float, fy: Float, fw: Float, fh: Float): Matrix {
         val u0 = fx * g.dispW
@@ -122,8 +243,28 @@ object PdfSaver {
         val gr = Color.green(item.color) / 255f
         val b = Color.blue(item.color) / 255f
         val size = item.sizePt
-        val left = item.fx * g.dispW
-        val top = item.fy * g.dispH
+        var left = item.fx * g.dispW
+        var top = item.fy * g.dispH
+        if (item.boxed) {
+            val (wPt, hPt) = TextRender.sizePt(item)
+            val lw = TextRender.FRAME * size
+            val half = lw / 2
+            cs.saveGraphicsState()
+            cs.setStrokingColor(r, gr, b)
+            cs.setLineWidth(lw)
+            cs.setLineJoinStyle(1)
+            val pts = listOf(
+                g.toUser(left + half, top + half), g.toUser(left + wPt - half, top + half),
+                g.toUser(left + wPt - half, top + hPt - half), g.toUser(left + half, top + hPt - half)
+            )
+            cs.moveTo(pts[0].x, pts[0].y)
+            for (i in 1..3) cs.lineTo(pts[i].x, pts[i].y)
+            cs.closePath()
+            cs.stroke()
+            cs.restoreGraphicsState()
+            left += TextRender.PAD * size
+            top += TextRender.PAD * size
+        }
         lines.forEachIndexed { k, line ->
             if (line.isEmpty()) return@forEachIndexed
             val baseV = top + size * (TextRender.ASCENT + TextRender.LINE * k)
