@@ -45,6 +45,8 @@ import kotlin.math.sqrt
  */
 class CameraActivity : BaseActivity() {
 
+    override val darkSystemBars = true
+
     companion object {
         const val EXTRA_MODE = "mode"
         const val EXTRA_COUNT = "count"

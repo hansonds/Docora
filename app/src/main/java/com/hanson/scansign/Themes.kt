@@ -6,7 +6,10 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.activity.enableEdgeToEdge
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 
 /** Appearance: light / dark / system, accent colour, pure-black dark mode. */
 object Themes {
@@ -75,10 +78,30 @@ open class BaseActivity : AppCompatActivity() {
     /** Screens holding unsaved work can opt out of refreshing when the theme changes. */
     protected open val recreateOnThemeChange = true
 
+    /** Screens with a dark background (camera, crop) want light status-bar icons. */
+    protected open val darkSystemBars = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         Themes.apply(this)
         appliedVersion = Themes.version
+        // Android 15+ always draws apps edge-to-edge; do it on every version and keep content clear of the bars
+        if (darkSystemBars) enableEdgeToEdge(
+            androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+        ) else enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+    }
+
+    override fun onPostCreate(savedInstanceState: Bundle?) {
+        super.onPostCreate(savedInstanceState)
+        val root = findViewById<android.view.View>(android.R.id.content) ?: return
+        ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+            v.setPadding(bars.left, bars.top, bars.right, kotlin.math.max(bars.bottom, ime.bottom))
+            WindowInsetsCompat.CONSUMED
+        }
+        ViewCompat.requestApplyInsets(root)
     }
 
     override fun onResume() {

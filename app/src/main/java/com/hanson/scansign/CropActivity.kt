@@ -32,6 +32,8 @@ import kotlin.math.roundToInt
  */
 class CropActivity : BaseActivity() {
 
+    override val darkSystemBars = true
+
     companion object {
         const val EXTRA_SRC = "src"
         const val EXTRA_MODE = "mode"

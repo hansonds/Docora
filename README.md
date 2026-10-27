@@ -30,6 +30,9 @@ Everything is free: no ads, no watermark, no account, works offline.
 
 **Download:** [Docora.apk](https://github.com/hansonds/Docora/releases/latest/download/Docora.apk)
 
+## Google Play
+Everything needed for the Play Store listing is in [`playstore/`](playstore): 512×512 icon, feature graphic, privacy policy and listing text ([STORE_LISTING.md](playstore/STORE_LISTING.md)). Each release also contains **Docora-playstore.aab** for uploading.
+
 ## Building (GitHub does it for you)
 
 1. Create a new **private** repository on GitHub (e.g. `hansonds/Docora`).
