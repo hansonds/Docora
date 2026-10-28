@@ -1,47 +1,72 @@
-# Docora — PDF Editor & Scanner
+<p align="center">
+  <img src="docs/icon.png" width="112" alt="Docora icon">
+</p>
 
-Free Android app to scan documents, edit, sign and fill PDFs. By Hanson · [phoenicx.org](https://phoenicx.org)
+<h1 align="center">Docora — PDF Editor &amp; Scanner</h1>
 
-Everything is free: no ads, no watermark, no account, works offline.
+<p align="center">
+  Scan documents, edit, sign and fill PDFs on Android.<br>
+  <b>Completely free</b> — no ads, no watermark, no account, works offline.<br>
+  By Hanson · <a href="https://phoenicx.org">phoenicx.org</a>
+</p>
 
-**Scanning**
-- AI scanner (Google ML Kit, on-device): best-in-class edge detection, auto capture, removes shadows / stains / fingers
-- Built-in camera with live edge detection and auto capture (backup, selectable in Settings)
-- Import photos; manual corner adjustment with magnifier; filters (Magic color, B&W, Grayscale)
-- Multi-page PDF, A4 / Letter / fit, quality levels, ID-card layout (2 sides on one page)
-- Searchable PDFs: on-device OCR adds an invisible text layer
+<p align="center">
+  <a href="https://github.com/hansonds/Docora/releases/latest/download/Docora.apk"><b>⬇ Download Docora.apk</b></a> ·
+  <a href="https://hansonds.github.io/Docora/privacy/">Privacy policy</a>
+</p>
 
-**PDF editor** (any PDF: 1000+ pages, password-protected, damaged)
-- Smooth zoom, fast-scroll, go to page
-- Edit toolbar: Sign, Text, Draw (pen), Highlight, Shapes (box, circle, line, arrow), Whiteout, Image, Stamps (✓ ✗ APPROVED, PAID, date…), Pages, Get text
-- Fill PDF forms in place (text, checkboxes, radio, dropdowns, signature fields), existing answers visible
-- Undo / redo
+---
+
+## Features
+
+**Scan**
+- AI scanner (Google ML Kit, on-device): accurate edge detection, auto capture, removes shadows, stains and fingers
+- Built-in camera with live edge detection as a backup (choose in Settings)
+- Import from photos, adjust corners by hand with a magnifier
+- Filters: Auto (default — colour or crisp black-and-white, picked per page), Magic colour, Original, Grayscale, Black & white; set your default in Settings
+- Multi-page PDFs, A4 / Letter / fit, ID-card layout (both sides on one page)
+- Searchable PDFs: on-device OCR adds a hidden text layer
+
+**Read & edit** (any PDF — 1000+ pages, password-protected or damaged)
+- Opens in full screen for distraction-free reading (can be turned off)
+- Modern editor with a floating toolbar and tool dock, smooth zoom, fast scroll, go to page, night reading
+- Sign, add text, draw, highlight, shapes, whiteout, images and stamps — move, resize and rotate
+- Fill PDF forms in place; long-press to select and copy text; undo / redo
+- Save (replace the original or save a copy), compress, share with size options, print
+
+**Signatures**
+- Photograph a signature — the background is removed automatically — or draw with your finger
+- Share or save signatures as transparent PNG files
 
 **PDF tools**
-- Merge, Split (every page / every N / ranges), Extract pages, Organize (drag to reorder, rotate, delete, duplicate, blank page)
-- Compress, PDF → JPG, Images → PDF
-- Extract text (OCR: Latin and Devanagari scripts), Make searchable
-- Lock with password (AES), Remove password
-- Watermark, Page numbers
+- Merge (drag to reorder), split, extract and organize pages
+- Compress, PDF → JPG, images → PDF
+- Extract text with OCR (English, German and other Latin-script languages; Hindi / Devanagari)
+- Lock with a password (AES) or remove a password
+- Watermark, page numbers
 
-**More**: Save / Save as (choose any folder), share with optional compression, print, night reading mode, finger-drawn signatures, launcher shortcuts (Scan / Open PDF / Tools), themes (light / dark / system, 7 colours, pure black), tablet layouts.
+**Look**
+- Light, dark or system theme, 7 accent colours, pure black mode
+- Colourful modern icons; works on phones and tablets
 
-**Library**: search, sort, share, print, rename. Saved PDFs also go to **Downloads › Docora**.
+Saved PDFs appear in the app and in **Downloads › Docora**.
 
-**Download:** [Docora.apk](https://github.com/hansonds/Docora/releases/latest/download/Docora.apk)
+## Privacy
+
+Everything is processed on your phone. Your documents, scans and signatures are never uploaded. See the [privacy policy](https://hansonds.github.io/Docora/privacy/).
+
+## Requirements
+
+Android 8.0 or newer. The APK on this page works on all phones (64-bit and 32-bit).
 
 ## Google Play
-Everything needed for the Play Store listing is in [`playstore/`](playstore): 512×512 icon, feature graphic, privacy policy and listing text ([STORE_LISTING.md](playstore/STORE_LISTING.md)). Each release also contains **Docora-playstore.aab** for uploading.
 
-## Building (GitHub does it for you)
+Store listing material is in [`playstore/`](playstore): 512×512 icon, feature graphic, privacy policy and listing text ([STORE_LISTING.md](playstore/STORE_LISTING.md)). Every release also includes **Docora-playstore.aab** for uploading to Play Console.
 
-1. Create a new **private** repository on GitHub (e.g. `hansonds/Docora`).
-2. Upload everything in this folder, including the hidden `.github` folder and `app/scansign.jks`.
-3. Open the **Actions** tab — the "Build APK" workflow runs automatically (about 5 minutes).
-4. When it finishes, the APK is in **Releases** (and under the run's Artifacts).
+## Building
 
-The signing key (`app/scansign.jks`) is included so every build can install over the previous one. Keep the repository private.
+GitHub Actions builds the app automatically on every push to `main` and publishes **Docora.apk** and **Docora-playstore.aab** under [Releases](https://github.com/hansonds/Docora/releases).
 
 ## Tech
 
-Kotlin, AndroidX, Material 3, OpenCV 4.10 (edge detection, perspective warp, filters), PdfBox-Android (PDF creation and signing). minSdk 26 (Android 8.0+), arm64 and armv7.
+Kotlin, AndroidX, Material 3, CameraX, OpenCV 4.12 (edge detection, perspective correction, filters), PdfBox-Android (PDF editing), Google ML Kit (document scanner, text recognition). minSdk 26, targetSdk 36, 16 KB page-size ready.
