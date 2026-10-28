@@ -32,6 +32,8 @@ import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.android.material.slider.Slider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
+import kotlin.coroutines.resume
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
@@ -164,6 +166,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         findViewById<View>(R.id.btnRedo).setOnClickListener { redo() }
         findViewById<View>(R.id.btnFullscreen).setOnClickListener { setFullscreen(true) }
         btnExitFull.setOnClickListener { setFullscreen(false) }
+        setupFind()
         // keep pages clear of the floating bars and float the controls just above the dock
         val relayoutChrome = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> editorRoot.post { updateChrome() } }
         editorRoot.addOnLayoutChangeListener(relayoutChrome)
@@ -187,7 +190,11 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         setupTools()
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() = if (fullscreen) setFullscreen(false) else confirmLeave()
+            override fun handleOnBackPressed() = when {
+                searching -> closeFind()
+                fullscreen -> setFullscreen(false)
+                else -> confirmLeave()
+            }
         })
 
         open(null)
@@ -195,6 +202,8 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
 
     override fun onDestroy() {
         super.onDestroy()
+        findJob?.cancel()
+        closeSearchDoc()
         doc.release()
         renderer?.close()
     }
@@ -248,6 +257,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         }
         pdf = p
         renderer = r
+        resetSearch()
         doc.setDocument(p.geoms, r, p.widgets, items)
         if (restorePage > 0) { val rp = restorePage; doc.post { doc.goToPage(rp) } }
         restorePage = -1
@@ -384,6 +394,213 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         if (fullscreen) flashExit()
     }
 
+    // ---------------- find in document ----------------
+
+    private lateinit var findBar: View
+    private lateinit var findText: EditText
+    private lateinit var findCount: TextView
+    private lateinit var findProgress: View
+    private var searching = false
+    private var findJob: kotlinx.coroutines.Job? = null
+    private val pageTexts = HashMap<Int, PageText>()
+    private var searchDoc: com.tom_roush.pdfbox.pdmodel.PDDocument? = null
+    private val searchLock = kotlinx.coroutines.sync.Mutex()
+    private val hits = ArrayList<SearchHit>()
+    private var currentHit: SearchHit? = null
+    private var lastQuery = ""
+    private var findDone = false
+    private val findDebounce = Runnable { runSearch(findText.text.toString()) }
+
+    private fun setupFind() {
+        findBar = findViewById(R.id.findBar)
+        findText = findViewById(R.id.findText)
+        findCount = findViewById(R.id.findCount)
+        findProgress = findViewById(R.id.findProgress)
+        findViewById<View>(R.id.findClose).setOnClickListener { closeFind() }
+        findViewById<View>(R.id.findNext).setOnClickListener { stepHit(1) }
+        findViewById<View>(R.id.findPrev).setOnClickListener { stepHit(-1) }
+        findText.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) {
+                if (!searching) return
+                findText.removeCallbacks(findDebounce)
+                findText.postDelayed(findDebounce, 450)
+            }
+        })
+        findText.setOnEditorActionListener { _, action, _ ->
+            if (action == EditorInfo.IME_ACTION_SEARCH) {
+                findText.removeCallbacks(findDebounce)
+                // Enter on the same words jumps to the next match
+                if (PdfSearch.normalise(findText.text.toString()) == lastQuery && hits.isNotEmpty()) stepHit(1)
+                else runSearch(findText.text.toString())
+                true
+            } else false
+        }
+    }
+
+    private fun keyboard(show: Boolean) {
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+        if (show) imm.showSoftInput(findText, 0) else imm.hideSoftInputFromWindow(findText.windowToken, 0)
+    }
+
+    private fun openFind() {
+        if (pdf == null || searching) return
+        if (fullscreen) setFullscreen(false)
+        commitEdit()
+        setTool(ActiveTool.NONE)
+        doc.clearTextSelection()
+        searching = true
+        topBar.visibility = View.INVISIBLE
+        dock.visibility = View.INVISIBLE
+        undoBox.visibility = View.INVISIBLE
+        findBar.visibility = View.VISIBLE
+        findBar.alpha = 0f
+        findBar.animate().alpha(1f).setDuration(160).start()
+        findText.requestFocus()
+        findText.post { keyboard(true) }
+        updateChrome()
+        // searching again opens with the previous words still highlighted
+        if (hits.isNotEmpty()) doc.setSearchHits(hits, currentHit)
+    }
+
+    private fun closeFind() {
+        if (!searching) return
+        searching = false
+        findText.removeCallbacks(findDebounce)
+        keyboard(false)
+        findText.clearFocus()
+        findJob?.cancel()
+        findProgress.visibility = View.GONE
+        doc.setSearchHits(emptyList(), null)
+        findBar.visibility = View.GONE
+        topBar.visibility = View.VISIBLE
+        dock.visibility = View.VISIBLE
+        undoBox.visibility = View.VISIBLE
+        updateChrome()
+    }
+
+    private fun closeSearchDoc() {
+        try { searchDoc?.close() } catch (_: Throwable) {}
+        searchDoc = null
+    }
+
+    /** A new or re-saved file: cached page text no longer applies. */
+    private fun resetSearch() {
+        findJob?.cancel()
+        pageTexts.clear()
+        hits.clear()
+        currentHit = null
+        lastQuery = ""
+        val old = searchDoc
+        searchDoc = null
+        if (old != null) lifecycleScope.launch(Dispatchers.IO) { searchLock.withLock { try { old.close() } catch (_: Throwable) {} } }
+        if (::findBar.isInitialized && searching) closeFind()
+    }
+
+    private fun runSearch(raw: String) {
+        val q = PdfSearch.normalise(raw)
+        if (q == lastQuery && (findJob?.isActive == true || findDone)) return
+        val p = pdf ?: return
+        lastQuery = q
+        findJob?.cancel()
+        hits.clear()
+        currentHit = null
+        findDone = false
+        doc.setSearchHits(emptyList(), null)
+        if (q.isEmpty()) { findCount.text = ""; findProgress.visibility = View.GONE; return }
+        val n = p.geoms.size
+        val start = doc.currentPage().coerceIn(0, n - 1)
+        findProgress.visibility = View.VISIBLE
+        findCount.text = ""
+        findJob = lifecycleScope.launch {
+            // start on the page being read, then wrap around
+            for (k in 0 until n) {
+                val page = (start + k) % n
+                val pt = pageText(p, page)
+                val found = PdfSearch.find(page, pt, q)
+                if (found.isNotEmpty()) {
+                    hits.addAll(found)
+                    hits.sortBy { it.page }
+                    if (currentHit == null) { currentHit = found.first(); doc.reveal(found.first()) }
+                    doc.setSearchHits(hits, currentHit)
+                }
+                showCount(stillSearching = true)
+            }
+            findDone = true
+            findProgress.visibility = View.GONE
+            showCount(stillSearching = false)
+        }
+    }
+
+    private fun showCount(stillSearching: Boolean) {
+        val i = hits.indexOf(currentHit)
+        findCount.text = when {
+            hits.isEmpty() && stillSearching -> ""
+            hits.isEmpty() -> "None"
+            else -> "${i + 1}/${hits.size}" + if (stillSearching) "+" else ""
+        }
+    }
+
+    private fun stepHit(dir: Int) {
+        if (hits.isEmpty()) return
+        val i = hits.indexOf(currentHit)
+        val next = hits[((if (i < 0) 0 else i + dir) % hits.size + hits.size) % hits.size]
+        currentHit = next
+        doc.setSearchHits(hits, next)
+        doc.reveal(next)
+        showCount(stillSearching = findJob?.isActive == true)
+    }
+
+    /** Text of a page for searching: the PDF's own text, or recognised text for scanned pages. */
+    private suspend fun pageText(p: OpenedPdf, page: Int): PageText {
+        pageTexts[page]?.let { return it }
+        var t = withContext(Dispatchers.IO) {
+            searchLock.withLock {
+                try {
+                    val d = searchDoc ?: com.tom_roush.pdfbox.pdmodel.PDDocument.load(p.displayFile, "", PdfOpener.memory())
+                        .also { searchDoc = it }
+                    PdfSearch.pdfText(d, page, p.geoms[page])
+                } catch (e: Throwable) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    PageText("", emptyList())
+                }
+            }
+        }
+        // hardly any real text: it's a scanned page, so read it with on-device OCR
+        if (t.text.count { !it.isWhitespace() } < 12) {
+            val words = doc.pageWords(page) ?: ocrPage(page)
+            if (words != null) {
+                val ocr = PdfSearch.ocrText(words)
+                if (ocr.text.length > t.text.length) t = ocr
+            }
+        }
+        pageTexts[page] = t
+        return t
+    }
+
+    private suspend fun ocrPage(page: Int): List<PdfDocView.Word>? {
+        val r = renderer ?: return null
+        val bmp = kotlinx.coroutines.suspendCancellableCoroutine<android.graphics.Bitmap?> { cont ->
+            r.renderPage(page, 1800, stillWanted = { cont.isActive }) { b ->
+                if (cont.isActive) cont.resume(b) else b?.recycle()
+            }
+        } ?: return null
+        val words = withContext(Dispatchers.IO) {
+            try { ocrWords(bmp) } catch (e: Throwable) { if (e is kotlinx.coroutines.CancellationException) throw e; emptyList() }
+            finally { bmp.recycle() }
+        }
+        doc.setPageWords(page, words)
+        return words
+    }
+
+    private fun ocrWords(bmp: android.graphics.Bitmap) = Ocr.words(this, bmp).map { w ->
+        PdfDocView.Word(w.text, android.graphics.RectF(
+            w.box.left.toFloat() / bmp.width, w.box.top.toFloat() / bmp.height,
+            w.box.right.toFloat() / bmp.width, w.box.bottom.toFloat() / bmp.height
+        ), w.lineEnd)
+    }
+
     // ---------------- floating bars + full screen ----------------
 
     private fun dp(v: Float) = v * resources.displayMetrics.density
@@ -393,9 +610,12 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         val h = editorRoot.height
         if (h == 0) return
         val dockCover = (h - dock.top).toFloat()
-        if (fullscreen) doc.setInsets(dp(4f), dp(8f))
-        else doc.setInsets(topBar.bottom + dp(6f), dockCover + dp(6f))
-        val bottom = (if (fullscreen) dp(20f) else dockCover + dp(12f)).toInt()
+        when {
+            fullscreen -> doc.setInsets(dp(4f), dp(8f))
+            searching -> doc.setInsets(topBar.bottom + dp(6f), dp(8f))
+            else -> doc.setInsets(topBar.bottom + dp(6f), dockCover + dp(6f))
+        }
+        val bottom = (if (fullscreen || searching) dp(20f) else dockCover + dp(12f)).toInt()
         for (v in listOf(zoomBox, undoBox, pagePill)) {
             val lp = v.layoutParams as FrameLayout.LayoutParams
             if (lp.bottomMargin != bottom) { lp.bottomMargin = bottom; v.layoutParams = lp }
@@ -777,6 +997,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     private fun setupToolbarMenu() {
         val m = toolbar.menu
         val always = android.view.MenuItem.SHOW_AS_ACTION_ALWAYS
+        m.add(0, 12, 0, "Find").setIcon(R.drawable.ic_search).setShowAsAction(always)
         m.add(0, 10, 0, "Compress").setIcon(R.drawable.ic_compress).setShowAsAction(always)
         m.add(0, 3, 1, "Save").setIcon(R.drawable.bg_save_fab).setShowAsAction(always)
         m.add(0, 11, 2, "Full screen").setIcon(R.drawable.ic_fullscreen)
@@ -788,6 +1009,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         toolbar.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 11 -> setFullscreen(true)
+                12 -> openFind()
                 3 -> if (requireEditable()) quickSave()
                 10 -> compressCurrent()
                 4 -> goToPageDialog()
