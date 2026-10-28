@@ -417,9 +417,11 @@ class PdfDocView @JvmOverloads constructor(
 
         override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
             if (mode != Mode.PAN) return false
+            val fitsY = totalH * zoom < height
+            if (fitsY && maxScrollX() <= 0f) return true
             scroller.fling(
-                scrollXf.roundToInt(), scrollYf.roundToInt(), (-vx).roundToInt(), (-vy).roundToInt(),
-                0, maxScrollX().roundToInt(), 0, maxScrollY().roundToInt()
+                scrollXf.roundToInt(), scrollYf.roundToInt(), (-vx).roundToInt(), if (fitsY) 0 else (-vy).roundToInt(),
+                0, maxScrollX().roundToInt(), scrollYf.roundToInt().coerceAtMost(0), maxScrollY().roundToInt()
             )
             postInvalidateOnAnimation()
             return true
@@ -591,7 +593,10 @@ class PdfDocView @JvmOverloads constructor(
 
     private fun clampScroll() {
         scrollXf = scrollXf.coerceIn(0f, maxScrollX())
-        scrollYf = scrollYf.coerceIn(0f, maxScrollY())
+        val content = totalH * zoom
+        // everything fits (e.g. a single page): centre it vertically instead of sticking to the top
+        scrollYf = if (content < height && geoms.isNotEmpty()) -(height - content) / 2f
+        else scrollYf.coerceIn(0f, maxScrollY())
     }
 
     private fun scrollTo(x: Float, y: Float) {
