@@ -632,6 +632,19 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         }
     }
 
+    /** True for the 3-button (or 2-button) navigation bar; false for gesture navigation. */
+    private fun usesNavButtons(): Boolean {
+        val ins = window.decorView.rootWindowInsets ?: return true
+        val t = when {
+            android.os.Build.VERSION.SDK_INT >= 30 ->
+                ins.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.tappableElement())
+            android.os.Build.VERSION.SDK_INT >= 29 -> ins.tappableElementInsets
+            else -> return true
+        }
+        // the gesture handle isn't tappable; a button bar is (bottom, or the side in landscape)
+        return t.bottom > 0 || t.left > 0 || t.right > 0
+    }
+
     private fun flashExit() {
         fade(btnExitFull, true)
         btnExitFull.removeCallbacks(hideExit)
@@ -644,11 +657,12 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         if (on) { commitEdit(); setTool(ActiveTool.NONE); doc.clearTextSelection() }
         fullscreen = on
         val ctl = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
-        val bars = androidx.core.view.WindowInsetsCompat.Type.systemBars()
+        val all = androidx.core.view.WindowInsetsCompat.Type.systemBars()
         if (on) {
             ctl.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            ctl.hide(bars)
-        } else ctl.show(bars)
+            // with Back / Home / Recents buttons, keep them on screen and hide only the status bar
+            ctl.hide(if (usesNavButtons()) androidx.core.view.WindowInsetsCompat.Type.statusBars() else all)
+        } else ctl.show(all)
 
         val slideUp = -(topBar.bottom + dp(12f))
         val slideDown = (editorRoot.height - dock.top) + dp(12f)
