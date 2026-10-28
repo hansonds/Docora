@@ -150,11 +150,12 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         }
 
         val path = intent.getStringExtra(EXTRA_PDF)
-        if (path == null) { finish(); return }
-        source = File(path)
-        displayName = intent.getStringExtra(EXTRA_NAME) ?: source.name
         sourceUri = if (android.os.Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(EXTRA_URI, android.net.Uri::class.java)
         else @Suppress("DEPRECATION") intent.getParcelableExtra(EXTRA_URI)
+        // opened from another app: only the link is known, the copy is made below
+        if (path == null && sourceUri == null) { finish(); return }
+        source = if (path != null) File(path) else File(cacheDir, "opening.pdf")
+        displayName = intent.getStringExtra(EXTRA_NAME) ?: if (path != null) source.name else "document.pdf"
         toolbar.title = displayName
         findViewById<View>(R.id.btnBack).setOnClickListener { confirmLeave() }
         doc.listener = this
@@ -197,7 +198,26 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             }
         })
 
-        open(null)
+        if (path != null) open(null) else openFromLink(sourceUri!!)
+    }
+
+    /** Copies a PDF shared or opened from another app (WhatsApp, Files, Gmail…) and opens it. */
+    private fun openFromLink(uri: android.net.Uri) {
+        setLoading(true, "Opening…")
+        lifecycleScope.launch {
+            val name = withContext(Dispatchers.IO) { Storage.displayName(this@PdfEditorActivity, uri) } ?: "document.pdf"
+            val f = withContext(Dispatchers.IO) { Storage.copyUriToWork(this@PdfEditorActivity, uri, "pdf") }
+            if (f == null) {
+                setLoading(false, null)
+                Toast.makeText(this@PdfEditorActivity, "Could not open that PDF", Toast.LENGTH_LONG).show()
+                finish()
+                return@launch
+            }
+            source = f
+            displayName = name
+            toolbar.title = name
+            open(null)
+        }
     }
 
     override fun onDestroy() {
