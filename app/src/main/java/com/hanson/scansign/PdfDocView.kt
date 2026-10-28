@@ -217,7 +217,10 @@ class PdfDocView @JvmOverloads constructor(
     private val hMargin = 10 * density
     private val gap = 10 * density
     private val topPad = 10 * density
-    private val bottomPad = 96 * density
+    private val bottomPad = 24 * density
+    /** Space taken by the floating bars (screen px); pages scroll underneath them. */
+    private var insetTop = 0f
+    private var insetBottom = 72 * density
     private var contentW = 0f
     private var pageTop = FloatArray(0)
     private var pageH = FloatArray(0)
@@ -251,7 +254,16 @@ class PdfDocView @JvmOverloads constructor(
 
     // ---- paints ----
     private val bgColor = ContextCompat.getColor(context, R.color.viewer_bg)
+    private val bgTop = ContextCompat.getColor(context, R.color.viewer_bg_top)
+    private val bgBottom = ContextCompat.getColor(context, R.color.viewer_bg_bottom)
+    private val bgPaint = Paint()
     private val pageShadow = Paint().apply { color = Color.argb(28, 0, 0, 0) }
+    /** Soft floating shadow under each page (blurred shadows need Android 9+ with hardware drawing). */
+    private val softShadow = android.os.Build.VERSION.SDK_INT >= 28
+    private val pageGlow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        setShadowLayer(14 * resources.displayMetrics.density, 0f, 4 * resources.displayMetrics.density, Color.argb(60, 10, 20, 50))
+    }
     private val pageFill = Paint().apply { color = Color.WHITE }
     private val placeholderText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.rgb(170, 176, 190); textAlign = Paint.Align.CENTER; textSize = 16 * density
@@ -383,7 +395,24 @@ class PdfDocView @JvmOverloads constructor(
         if (geoms.isEmpty()) return
         val i = index.coerceIn(0, geoms.size - 1)
         scroller.forceFinished(true)
-        scrollTo(scrollXf, (pageTop[i] - topPad) * zoom)
+        scrollTo(scrollXf, (pageTop[i] - topPad) * zoom - insetTop)
+    }
+
+    /**
+     * Space covered by floating bars at the top and bottom (screen pixels). The first page starts
+     * below the top bar and the last page can scroll above the bottom bar; what's on screen
+     * doesn't jump when the bars show or hide.
+     */
+    fun setInsets(top: Float, bottom: Float) {
+        if (top == insetTop && bottom == insetBottom) return
+        val dTop = top - insetTop
+        insetTop = top
+        insetBottom = bottom
+        relayout()
+        scrollYf += dTop * zoom
+        clampScroll()
+        onViewportChanged()
+        invalidate()
     }
 
     fun zoomIn() = animateZoom(min(maxZoom, zoom * 1.6f), width / 2f, height / 2f)
@@ -422,6 +451,7 @@ class PdfDocView @JvmOverloads constructor(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
+        bgPaint.shader = null
         if (w == oldw && oldw != 0) {
             // only the height changed (keyboard opened/closed): keep position, layout is width-based
             clampScroll()
@@ -445,8 +475,8 @@ class PdfDocView @JvmOverloads constructor(
     fun ensureVisible(r: RectF) {
         val margin = 24 * density
         var dy = 0f
-        if (r.bottom > height - margin) dy = r.bottom - (height - margin)
-        if (r.top - dy < margin) dy = r.top - margin
+        if (r.bottom > height - insetBottom - margin) dy = r.bottom - (height - insetBottom - margin)
+        if (r.top - dy < insetTop + margin) dy = r.top - insetTop - margin
         var dx = 0f
         if (r.right > width - margin) dx = r.right - (width - margin)
         if (r.left - dx < margin) dx = r.left - margin
@@ -458,14 +488,14 @@ class PdfDocView @JvmOverloads constructor(
         contentW = width - 2 * hMargin
         pageTop = FloatArray(geoms.size)
         pageH = FloatArray(geoms.size)
-        var y = topPad
+        var y = topPad + insetTop
         for (i in geoms.indices) {
             val g = geoms[i]
             pageTop[i] = y
             pageH[i] = contentW * g.dispH / g.dispW
             y += pageH[i] + gap
         }
-        totalH = y - gap + bottomPad
+        totalH = y - gap + bottomPad + insetBottom
         clampScroll()
     }
 
@@ -559,7 +589,10 @@ class PdfDocView @JvmOverloads constructor(
     // ======================= drawing =======================
 
     override fun onDraw(canvas: Canvas) {
-        canvas.drawColor(bgColor)
+        if (bgPaint.shader == null && height > 0) {
+            bgPaint.shader = android.graphics.LinearGradient(0f, 0f, 0f, height.toFloat(), bgTop, bgBottom, android.graphics.Shader.TileMode.CLAMP)
+        }
+        if (bgPaint.shader != null) canvas.drawPaint(bgPaint) else canvas.drawColor(bgColor)
         if (geoms.isEmpty() || pageTop.isEmpty()) return
         val range = visibleRange()
         if (range.isEmpty()) return
@@ -568,7 +601,8 @@ class PdfDocView @JvmOverloads constructor(
 
         for (i in range) {
             val r = pageScreenRect(i)
-            canvas.drawRect(r.left + 2 * density, r.top + 3 * density, r.right + 2 * density, r.bottom + 3 * density, pageShadow)
+            if (softShadow) canvas.drawRect(r, pageGlow)
+            else canvas.drawRect(r.left + 2 * density, r.top + 3 * density, r.right + 2 * density, r.bottom + 3 * density, pageShadow)
             canvas.drawRect(r, pageFill)
             val base = baseCache.get(i)
             if (base != null) {
@@ -827,9 +861,9 @@ class PdfDocView @JvmOverloads constructor(
     private fun scrollbarEnabled() = maxScrollY() > height * 2.5f
 
     private fun thumbTop(): Float {
-        val track = height - thumbH - 2 * topPad
+        val track = height - thumbH - 2 * topPad - insetTop - insetBottom
         val m = maxScrollY()
-        return topPad + if (m > 0) scrollYf / m * track else 0f
+        return topPad + insetTop + if (m > 0) scrollYf / m * track else 0f
     }
 
     private fun drawScrollbar(canvas: Canvas) {
@@ -889,8 +923,8 @@ class PdfDocView @JvmOverloads constructor(
         when (mode) {
             Mode.SCROLLBAR -> {
                 if (e.actionMasked == MotionEvent.ACTION_MOVE) {
-                    val track = height - thumbH - 2 * topPad
-                    val t = ((e.y - thumbH / 2 - topPad) / track).coerceIn(0f, 1f)
+                    val track = height - thumbH - 2 * topPad - insetTop - insetBottom
+                    val t = ((e.y - thumbH / 2 - topPad - insetTop) / track).coerceIn(0f, 1f)
                     scrollTo(scrollXf, t * maxScrollY())
                 }
             }

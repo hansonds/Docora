@@ -1,35 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- PDF editor: the document fills the screen; glass bars float over it. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/editorRoot"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:orientation="vertical">
+    android:layout_height="match_parent">
 
-    <com.google.android.material.appbar.MaterialToolbar
-        android:id="@+id/toolbar"
-        style="@style/Widget.App.Toolbar"
+    <com.hanson.scansign.PdfDocView
+        android:id="@+id/doc"
         android:layout_width="match_parent"
-        android:layout_height="?attr/actionBarSize"
-        app:navigationIcon="@drawable/ic_back"
-        app:titleTextAppearance="@style/TextAppearance.Material3.TitleMedium" />
-
-    <FrameLayout
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1">
-
-        <com.hanson.scansign.PdfDocView
-            android:id="@+id/doc"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent" />
+        android:layout_height="match_parent" />
 
         <TextView
             android:id="@+id/formBanner"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_gravity="top"
-            android:layout_margin="10dp"
-            android:background="@drawable/bg_page_pill"
+            android:layout_marginHorizontal="14dp"
+            android:layout_marginTop="88dp"
+            android:background="@drawable/bg_glass_dark"
             android:drawablePadding="8dp"
             android:paddingHorizontal="16dp"
             android:paddingVertical="10dp"
@@ -53,7 +42,7 @@
             android:id="@+id/textBar"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:background="@drawable/bg_page_pill"
+            android:background="@drawable/bg_glass_dark"
             android:elevation="6dp"
             android:orientation="horizontal"
             android:paddingHorizontal="4dp"
@@ -84,54 +73,125 @@
                 android:textColor="#FFFFFF" />
         </LinearLayout>
 
+        <!-- page counter: tap to jump to a page -->
         <TextView
             android:id="@+id/pagePill"
             android:layout_width="wrap_content"
-            android:layout_height="36dp"
+            android:layout_height="34dp"
             android:layout_gravity="bottom|center_horizontal"
-            android:layout_marginBottom="16dp"
-            android:background="@drawable/bg_page_pill"
+            android:layout_marginBottom="110dp"
+            android:background="@drawable/bg_page_chip"
             android:gravity="center"
-            android:minWidth="88dp"
+            android:letterSpacing="0.08"
+            android:minWidth="76dp"
             android:paddingHorizontal="16dp"
             android:textColor="#FFFFFF"
-            android:textSize="14sp"
+            android:textSize="13sp"
             android:textStyle="bold"
             android:visibility="gone" />
 
+        <!-- zoom + full screen rail -->
         <LinearLayout
             android:id="@+id/zoomBox"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="bottom|end"
             android:layout_marginEnd="14dp"
-            android:layout_marginBottom="14dp"
+            android:layout_marginBottom="110dp"
+            android:background="@drawable/bg_glass_dark"
+            android:elevation="6dp"
+            android:gravity="center_horizontal"
             android:orientation="vertical"
+            android:padding="4dp"
             android:visibility="gone">
 
-            <com.google.android.material.button.MaterialButton
+            <ImageButton
                 android:id="@+id/btnZoomIn"
-                style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="Zoom in"
-                app:icon="@drawable/ic_zoom_in" />
+                android:src="@drawable/ic_zoom_in"
+                app:tint="#FFFFFF" />
 
-            <com.google.android.material.button.MaterialButton
+            <ImageButton
                 android:id="@+id/btnZoomOut"
-                style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="Zoom out"
-                app:icon="@drawable/ic_zoom_out" />
+                android:src="@drawable/ic_zoom_out"
+                app:tint="#FFFFFF" />
+
+            <View
+                android:layout_width="22dp"
+                android:layout_height="1dp"
+                android:layout_marginVertical="4dp"
+                android:background="#40FFFFFF" />
+
+            <ImageButton
+                android:id="@+id/btnFullscreen"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Full screen"
+                android:src="@drawable/ic_fullscreen"
+                app:tint="#FFFFFF" />
         </LinearLayout>
+
+        <!-- undo / redo -->
+        <LinearLayout
+            android:id="@+id/undoBox"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|start"
+            android:layout_marginStart="14dp"
+            android:layout_marginBottom="110dp"
+            android:background="@drawable/bg_glass_dark"
+            android:elevation="6dp"
+            android:orientation="horizontal"
+            android:padding="4dp"
+            android:visibility="gone">
+
+            <ImageButton
+                android:id="@+id/btnUndo"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Undo"
+                android:src="@drawable/ic_undo"
+                app:tint="#FFFFFF" />
+
+            <ImageButton
+                android:id="@+id/btnRedo"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Redo"
+                android:src="@drawable/ic_redo"
+                app:tint="#FFFFFF" />
+        </LinearLayout>
+
+        <!-- shown briefly in full screen -->
+        <ImageButton
+            android:id="@+id/btnExitFull"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_gravity="top|end"
+            android:layout_margin="16dp"
+            android:background="@drawable/bg_glass_round"
+            android:contentDescription="Exit full screen"
+            android:elevation="6dp"
+            android:src="@drawable/ic_fullscreen_exit"
+            android:visibility="gone"
+            app:tint="#FFFFFF" />
 
         <LinearLayout
             android:id="@+id/loading"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center"
-            android:background="@drawable/bg_page_pill"
+            android:background="@drawable/bg_glass_dark"
             android:gravity="center"
             android:orientation="vertical"
             android:padding="24dp">
@@ -139,7 +199,7 @@
             <ProgressBar
                 android:layout_width="44dp"
                 android:layout_height="44dp"
-                android:indeterminateTint="#FFFFFF" />
+                android:indeterminateTint="?attr/colorPrimary" />
 
             <TextView
                 android:id="@+id/loadingText"
@@ -149,18 +209,54 @@
                 android:text="Opening…"
                 android:textColor="#FFFFFF" />
         </LinearLayout>
-    </FrameLayout>
 
-    <com.google.android.material.card.MaterialCardView
+    <!-- floating top bar -->
+    <LinearLayout
+        android:id="@+id/topBar"
+        android:layout_width="match_parent"
+        android:layout_height="64dp"
+        android:layout_gravity="top"
+        android:layout_margin="10dp"
+        android:background="@drawable/bg_glass"
+        android:elevation="8dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="6dp">
+
+        <ImageButton
+            android:id="@+id/btnBack"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Back"
+            android:src="@drawable/ic_back"
+            app:tint="?attr/colorOnSurface" />
+
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="@android:color/transparent"
+            android:minHeight="0dp"
+            app:contentInsetStart="4dp"
+            app:contentInsetStartWithNavigation="0dp"
+            app:subtitleTextAppearance="@style/TextAppearance.Material3.BodySmall"
+            app:titleTextAppearance="@style/TextAppearance.App.EditorTitle" />
+
+    </LinearLayout>
+
+    <!-- floating tool dock -->
+    <LinearLayout
+        android:id="@+id/dock"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        app:cardCornerRadius="0dp"
-        app:cardElevation="8dp">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical">
+        android:layout_gravity="bottom"
+        android:layout_margin="10dp"
+        android:background="@drawable/bg_glass"
+        android:elevation="8dp"
+        android:orientation="vertical"
+        android:paddingVertical="4dp">
 
             <!-- options for the active drawing tool -->
             <LinearLayout
@@ -251,10 +347,10 @@
                     android:id="@+id/tools"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
                     android:orientation="horizontal"
-                    android:paddingHorizontal="4dp"
-                    android:paddingVertical="4dp" />
+                    android:paddingHorizontal="6dp"
+                    android:paddingVertical="2dp" />
             </HorizontalScrollView>
-        </LinearLayout>
-    </com.google.android.material.card.MaterialCardView>
-</LinearLayout>
+    </LinearLayout>
+</FrameLayout>

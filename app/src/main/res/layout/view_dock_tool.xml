@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One tool in the editor dock: glowing icon tile + label -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:background="?attr/selectableItemBackgroundBorderless"
+    android:clickable="true"
+    android:focusable="true"
+    android:gravity="center_horizontal"
+    android:minWidth="66dp"
+    android:orientation="vertical"
+    android:paddingHorizontal="4dp"
+    android:paddingVertical="6dp">
+
+    <ImageView
+        android:id="@+id/toolIcon"
+        android:layout_width="50dp"
+        android:layout_height="34dp"
+        android:background="@drawable/bg_tool_tile"
+        android:duplicateParentState="true"
+        android:importantForAccessibility="no"
+        android:padding="7dp"
+        android:scaleType="fitCenter"
+        app:tint="@color/dock_icon" />
+
+    <TextView
+        android:id="@+id/toolLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:duplicateParentState="true"
+        android:maxLines="1"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:textSize="11sp" />
+</LinearLayout>

@@ -94,4 +94,8 @@
     <style name="TextAppearance.App.Section" parent="TextAppearance.Material3.TitleMedium">
         <item name="android:textStyle">bold</item>
     </style>
+    <style name="TextAppearance.App.EditorTitle" parent="TextAppearance.Material3.TitleMedium">
+        <item name="android:textStyle">bold</item>
+        <item name="android:textSize">16sp</item>
+    </style>
 </resources>

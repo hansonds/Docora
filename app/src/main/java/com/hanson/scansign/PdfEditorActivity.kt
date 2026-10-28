@@ -68,6 +68,14 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     private lateinit var loading: View
     private lateinit var loadingText: TextView
     private lateinit var zoomBox: View
+    private lateinit var undoBox: View
+    private lateinit var topBar: View
+    private lateinit var dock: View
+    private lateinit var editorRoot: View
+    private lateinit var btnExitFull: View
+    private var fullscreen = false
+    private val hideExit = Runnable { fade(btnExitFull, false) }
+    private val hidePill = Runnable { if (fullscreen) fade(pagePill, false) }
     private lateinit var fieldEditor: EditText
     /** Field being typed into in place. */
     private var editingWidget: FormWidget? = null
@@ -125,6 +133,11 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         loading = findViewById(R.id.loading)
         loadingText = findViewById(R.id.loadingText)
         zoomBox = findViewById(R.id.zoomBox)
+        undoBox = findViewById(R.id.undoBox)
+        topBar = findViewById(R.id.topBar)
+        dock = findViewById(R.id.dock)
+        editorRoot = findViewById(R.id.editorRoot)
+        btnExitFull = findViewById(R.id.btnExitFull)
         fieldEditor = findViewById(R.id.fieldEditor)
         fieldEditor.setOnEditorActionListener { _, action, _ ->
             if (action == EditorInfo.IME_ACTION_NEXT) { nextField(); true }
@@ -139,12 +152,21 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         sourceUri = if (android.os.Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(EXTRA_URI, android.net.Uri::class.java)
         else @Suppress("DEPRECATION") intent.getParcelableExtra(EXTRA_URI)
         toolbar.title = displayName
-        toolbar.setNavigationOnClickListener { confirmLeave() }
+        findViewById<View>(R.id.btnBack).setOnClickListener { confirmLeave() }
         doc.listener = this
         doc.nightMode = getSharedPreferences("view", MODE_PRIVATE).getBoolean("night", false)
 
-        findViewById<MaterialButton>(R.id.btnZoomIn).setOnClickListener { doc.zoomIn() }
-        findViewById<MaterialButton>(R.id.btnZoomOut).setOnClickListener { doc.zoomOut() }
+        findViewById<View>(R.id.btnZoomIn).setOnClickListener { doc.zoomIn() }
+        findViewById<View>(R.id.btnZoomOut).setOnClickListener { doc.zoomOut() }
+        findViewById<View>(R.id.btnUndo).setOnClickListener { undo() }
+        findViewById<View>(R.id.btnRedo).setOnClickListener { redo() }
+        findViewById<View>(R.id.btnFullscreen).setOnClickListener { setFullscreen(true) }
+        btnExitFull.setOnClickListener { setFullscreen(false) }
+        // keep pages clear of the floating bars and float the controls just above the dock
+        val relayoutChrome = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> editorRoot.post { updateChrome() } }
+        editorRoot.addOnLayoutChangeListener(relayoutChrome)
+        dock.addOnLayoutChangeListener(relayoutChrome)
+        topBar.addOnLayoutChangeListener(relayoutChrome)
         pagePill.setOnClickListener { goToPageDialog() }
         textBar = findViewById(R.id.textBar)
         findViewById<MaterialButton>(R.id.selCopy).setOnClickListener {
@@ -163,7 +185,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         setupTools()
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() = confirmLeave()
+            override fun handleOnBackPressed() = if (fullscreen) setFullscreen(false) else confirmLeave()
         })
 
         open(null)
@@ -235,6 +257,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             if (p.fields.isNotEmpty()) " · ${p.fields.size} form fields" else ""
         pagePill.visibility = View.VISIBLE
         zoomBox.visibility = View.VISIBLE
+        undoBox.visibility = View.VISIBLE
         pagePill.text = "1 / ${p.geoms.size}"
         if (p.fields.isNotEmpty()) {
             formBanner.visibility = View.VISIBLE
@@ -264,6 +287,11 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
 
     override fun onPageChanged(page: Int) {
         pagePill.text = "${page + 1} / ${doc.pageCount}"
+        if (fullscreen && pdf != null) {
+            fade(pagePill, true)
+            pagePill.removeCallbacks(hidePill)
+            pagePill.postDelayed(hidePill, 1400)
+        }
     }
 
     override fun onItemTapped(item: EditItem) {
@@ -346,6 +374,81 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
 
     override fun onAnyTap() {
         if (editingWidget != null) commitEdit()
+        if (fullscreen) flashExit()
+    }
+
+    // ---------------- floating bars + full screen ----------------
+
+    private fun dp(v: Float) = v * resources.displayMetrics.density
+
+    /** Tells the page view how much the bars cover, and floats the side controls above the dock. */
+    private fun updateChrome() {
+        val h = editorRoot.height
+        if (h == 0) return
+        val dockCover = (h - dock.top).toFloat()
+        if (fullscreen) doc.setInsets(dp(4f), dp(8f))
+        else doc.setInsets(topBar.bottom + dp(6f), dockCover + dp(6f))
+        val bottom = (if (fullscreen) dp(20f) else dockCover + dp(12f)).toInt()
+        for (v in listOf(zoomBox, undoBox, pagePill)) {
+            val lp = v.layoutParams as FrameLayout.LayoutParams
+            if (lp.bottomMargin != bottom) { lp.bottomMargin = bottom; v.layoutParams = lp }
+        }
+    }
+
+    private fun fade(v: View, show: Boolean) {
+        v.animate().cancel()
+        if (show) {
+            if (v.visibility != View.VISIBLE) { v.alpha = 0f; v.visibility = View.VISIBLE }
+            v.animate().alpha(1f).setDuration(180).start()
+        } else if (v.visibility == View.VISIBLE) {
+            v.animate().alpha(0f).setDuration(180).withEndAction { v.visibility = View.INVISIBLE }.start()
+        }
+    }
+
+    private fun flashExit() {
+        fade(btnExitFull, true)
+        btnExitFull.removeCallbacks(hideExit)
+        btnExitFull.postDelayed(hideExit, 2600)
+    }
+
+    /** Full-screen reading: hides the bars, controls and the phone's status/navigation bars. */
+    private fun setFullscreen(on: Boolean) {
+        if (on == fullscreen) return
+        if (on) { commitEdit(); setTool(ActiveTool.NONE); doc.clearTextSelection() }
+        fullscreen = on
+        val ctl = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+        val bars = androidx.core.view.WindowInsetsCompat.Type.systemBars()
+        if (on) {
+            ctl.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            ctl.hide(bars)
+        } else ctl.show(bars)
+
+        val slideUp = -(topBar.bottom + dp(12f))
+        val slideDown = (editorRoot.height - dock.top) + dp(12f)
+        for ((v, dy) in listOf(topBar to slideUp, dock to slideDown)) {
+            v.animate().cancel()
+            if (on) {
+                v.animate().translationY(dy).alpha(0f).setDuration(240)
+                    .withEndAction { v.visibility = View.INVISIBLE }.start()
+            } else {
+                v.visibility = View.VISIBLE
+                v.animate().translationY(0f).alpha(1f).setDuration(240).start()
+            }
+        }
+        val ready = pdf != null
+        fade(zoomBox, !on && ready)
+        fade(undoBox, !on && ready)
+        pagePill.removeCallbacks(hidePill)
+        fade(pagePill, !on && ready)
+        if (on) {
+            flashExit()
+            hintOnce("fs_hint", "Tap the page to show the exit button")
+        } else {
+            btnExitFull.removeCallbacks(hideExit)
+            btnExitFull.animate().cancel()
+            btnExitFull.visibility = View.GONE
+        }
+        updateChrome()
     }
 
     // ---------------- in-place form typing ----------------
@@ -649,8 +752,10 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     private fun redo() { if (hIndex < history.size - 1) { hIndex++; restore(history[hIndex]) } }
 
     private fun updateUndoButtons() {
-        toolbar.menu.findItem(1)?.let { it.isEnabled = hIndex > 0; it.icon?.alpha = if (hIndex > 0) 255 else 90 }
-        toolbar.menu.findItem(2)?.let { it.isEnabled = hIndex < history.size - 1; it.icon?.alpha = if (hIndex < history.size - 1) 255 else 90 }
+        val canUndo = hIndex > 0
+        val canRedo = hIndex < history.size - 1
+        findViewById<View>(R.id.btnUndo)?.let { it.isEnabled = canUndo; it.alpha = if (canUndo) 1f else 0.35f }
+        findViewById<View>(R.id.btnRedo)?.let { it.isEnabled = canRedo; it.alpha = if (canRedo) 1f else 0.35f }
     }
 
     private fun commitEditSilently() {
@@ -665,19 +770,17 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     private fun setupToolbarMenu() {
         val m = toolbar.menu
         val always = android.view.MenuItem.SHOW_AS_ACTION_ALWAYS
-        m.add(0, 1, 0, "Undo").setIcon(R.drawable.ic_undo).setShowAsAction(always)
-        m.add(0, 2, 1, "Redo").setIcon(R.drawable.ic_redo).setShowAsAction(always)
-        m.add(0, 3, 2, "Save").setIcon(R.drawable.ic_save).setShowAsAction(always)
-        m.add(0, 10, 3, "Compress").setIcon(R.drawable.ic_compress).setShowAsAction(always)
-        m.add(0, 5, 4, "Share…")
-        m.add(0, 8, 5, "Print")
-        m.add(0, 9, 6, "Night reading").apply { isCheckable = true; isChecked = getSharedPreferences("view", MODE_PRIVATE).getBoolean("night", false) }
-        m.add(0, 4, 7, "Go to page")
-        m.add(0, 6, 8, "More PDF tools")
+        m.add(0, 10, 0, "Compress").setIcon(R.drawable.ic_compress).setShowAsAction(always)
+        m.add(0, 3, 1, "Save").setIcon(R.drawable.bg_save_fab).setShowAsAction(always)
+        m.add(0, 11, 2, "Full screen").setIcon(R.drawable.ic_fullscreen)
+        m.add(0, 5, 3, "Share…")
+        m.add(0, 8, 4, "Print")
+        m.add(0, 9, 5, "Night reading").apply { isCheckable = true; isChecked = getSharedPreferences("view", MODE_PRIVATE).getBoolean("night", false) }
+        m.add(0, 4, 6, "Go to page")
+        m.add(0, 6, 7, "More PDF tools")
         toolbar.setOnMenuItemClickListener { item ->
             when (item.itemId) {
-                1 -> undo()
-                2 -> redo()
+                11 -> setFullscreen(true)
                 3 -> if (requireEditable()) quickSave()
                 10 -> compressCurrent()
                 4 -> goToPageDialog()
@@ -723,12 +826,46 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     private enum class ActiveTool { NONE, PEN, HIGHLIGHT, SHAPE, WHITEOUT }
     private var active = ActiveTool.NONE
 
-    private fun toolButton(parent: LinearLayout, label: String, icon: Int, onClick: () -> Unit) {
-        val b = LayoutInflater.from(this).inflate(R.layout.view_tool_button, parent, false) as MaterialButton
-        b.text = label
-        b.setIconResource(icon)
-        b.setOnClickListener { onClick() }
+    private val toolViews = HashMap<ActiveTool, View>()
+
+    private fun toolButton(parent: LinearLayout, label: String, icon: Int, tool: ActiveTool? = null, onClick: () -> Unit) {
+        val b = LayoutInflater.from(this).inflate(R.layout.view_dock_tool, parent, false)
+        b.findViewById<android.widget.ImageView>(R.id.toolIcon).setImageResource(icon)
+        b.findViewById<TextView>(R.id.toolLabel).text = label
+        b.contentDescription = label
+        b.setOnClickListener {
+            // tapping the active drawing tool again switches it off
+            if (tool != null && tool == active) setTool(ActiveTool.NONE) else onClick()
+        }
         parent.addView(b)
+        if (tool != null) toolViews[tool] = b
+    }
+
+    private fun dockDivider(parent: LinearLayout) {
+        val d = resources.displayMetrics.density
+        parent.addView(View(this).apply {
+            setBackgroundColor(androidx.core.content.ContextCompat.getColor(this@PdfEditorActivity, R.color.glass_stroke))
+            layoutParams = LinearLayout.LayoutParams((1 * d).toInt().coerceAtLeast(1), (36 * d).toInt()).apply {
+                marginStart = (4 * d).toInt(); marginEnd = (4 * d).toInt()
+            }
+        })
+    }
+
+    /** Lights up the dock tile of the active drawing tool. */
+    private fun markActiveTool() {
+        val accent = androidx.core.content.ContextCompat.getColor(this, Themes.accent(this).primary)
+        val idleIcon = androidx.core.content.ContextCompat.getColor(this, R.color.dock_icon)
+        val idleText = androidx.core.content.ContextCompat.getColor(this, R.color.md_on_surface_variant)
+        for ((t, v) in toolViews) {
+            val on = t == active
+            v.isSelected = on
+            v.findViewById<android.widget.ImageView>(R.id.toolIcon).imageTintList =
+                android.content.res.ColorStateList.valueOf(if (on) Color.WHITE else idleIcon)
+            v.findViewById<TextView>(R.id.toolLabel).apply {
+                setTextColor(if (on) accent else idleText)
+                setTypeface(null, if (on) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+            }
+        }
     }
 
     private fun setupTools() {
@@ -758,21 +895,22 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             if (requireEditable()) { setTool(ActiveTool.NONE); pendingSigWidget = null; pickSignature.launch(SignaturesActivity.intent(this, pick = true)) }
         }
         toolButton(bar, "Text", R.drawable.ic_text) { if (requireEditable()) { setTool(ActiveTool.NONE); textDialog(null) } }
-        toolButton(bar, "Draw", R.drawable.ic_draw) { if (requireEditable()) setTool(ActiveTool.PEN) }
-        toolButton(bar, "Highlight", R.drawable.ic_highlight) { if (requireEditable()) setTool(ActiveTool.HIGHLIGHT) }
-        toolButton(bar, "Shapes", R.drawable.ic_shapes) { if (requireEditable()) setTool(ActiveTool.SHAPE) }
-        toolButton(bar, "Whiteout", R.drawable.ic_eraser) { if (requireEditable()) setTool(ActiveTool.WHITEOUT) }
+        toolButton(bar, "Draw", R.drawable.ic_draw, ActiveTool.PEN) { if (requireEditable()) setTool(ActiveTool.PEN) }
+        toolButton(bar, "Highlight", R.drawable.ic_highlight, ActiveTool.HIGHLIGHT) { if (requireEditable()) setTool(ActiveTool.HIGHLIGHT) }
+        toolButton(bar, "Shapes", R.drawable.ic_shapes, ActiveTool.SHAPE) { if (requireEditable()) setTool(ActiveTool.SHAPE) }
+        toolButton(bar, "Whiteout", R.drawable.ic_eraser, ActiveTool.WHITEOUT) { if (requireEditable()) setTool(ActiveTool.WHITEOUT) }
         toolButton(bar, "Image", R.drawable.ic_image) {
             if (requireEditable()) { setTool(ActiveTool.NONE); pickImage.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
         }
         toolButton(bar, "Stamp", R.drawable.ic_stamp) { if (requireEditable()) { setTool(ActiveTool.NONE); stampDialog() } }
+        dockDivider(bar)
         toolButton(bar, "Pages", R.drawable.ic_pages) { setTool(ActiveTool.NONE); openPages() }
         toolButton(bar, "Get text", R.drawable.ic_ocr) { setTool(ActiveTool.NONE); extractText() }
         toolButton(bar, "Go to", R.drawable.ic_pdf) { goToPageDialog() }
-        toolButton(bar, "Save", R.drawable.ic_save) { if (requireEditable()) { setTool(ActiveTool.NONE); quickSave() } }
-        toolButton(bar, "Compress", R.drawable.ic_compress) { setTool(ActiveTool.NONE); compressCurrent() }
+        toolButton(bar, "Full screen", R.drawable.ic_fullscreen) { setFullscreen(true) }
         toolButton(bar, "Share", R.drawable.ic_share) { setTool(ActiveTool.NONE); shareCurrent() }
         toolButton(bar, "Print", R.drawable.ic_print) { setTool(ActiveTool.NONE); printCurrent() }
+        markActiveTool()
     }
 
     private fun setTool(t: ActiveTool) {
@@ -808,6 +946,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         }
         widthLabel.text = "Size ${"%.1f".format(toolWidth.value)}"
         applyTool()
+        markActiveTool()
     }
 
     private fun applyTool() {
