@@ -68,6 +68,51 @@ class PdfDocView @JvmOverloads constructor(
     private val selHandle = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(36, 87, 245) }
 
     fun hasPageWords(page: Int) = pageWords.containsKey(page)
+    fun pageWords(page: Int): List<Word>? = pageWords[page]
+
+    // ---- find in document ----
+    private var searchHits: Map<Int, List<SearchHit>> = emptyMap()
+    private var currentHit: SearchHit? = null
+    private val hitPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(105, 255, 214, 0) }
+    private val hitNowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(130, 255, 120, 0) }
+    private val hitNowStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; color = Color.rgb(255, 110, 0); strokeWidth = 2f * context.resources.displayMetrics.density
+    }
+
+    /** Highlights search matches; [current] is drawn stronger. */
+    fun setSearchHits(hits: List<SearchHit>, current: SearchHit?) {
+        searchHits = hits.groupBy { it.page }
+        currentHit = current
+        invalidate()
+    }
+
+    /** Scrolls so [hit] is in the middle of the visible area (between the floating bars). */
+    fun reveal(hit: SearchHit) {
+        if (hit.page !in geoms.indices || pageTop.isEmpty()) return
+        scroller.forceFinished(true)
+        val pr = pageScreenRect(hit.page)
+        val r = hit.rects.first()
+        val cx = pr.left + r.centerX() * pr.width()
+        val cy = pr.top + r.centerY() * pr.height()
+        val midY = insetTop + (height - insetTop - insetBottom) / 2f
+        scrollTo(scrollXf + (cx - width / 2f), scrollYf + (cy - midY))
+    }
+
+    private fun drawSearchHits(canvas: Canvas, page: Int, pr: RectF) {
+        val hits = searchHits[page] ?: return
+        val pad = 1.5f * density
+        for (h in hits) {
+            val now = h === currentHit
+            for (r in h.rects) {
+                val s = RectF(
+                    pr.left + r.left * pr.width() - pad, pr.top + r.top * pr.height() - pad,
+                    pr.left + r.right * pr.width() + pad, pr.top + r.bottom * pr.height() + pad
+                )
+                canvas.drawRoundRect(s, 3 * density, 3 * density, if (now) hitNowPaint else hitPaint)
+                if (now) canvas.drawRoundRect(s, 3 * density, 3 * density, hitNowStroke)
+            }
+        }
+    }
 
     fun setPageWords(page: Int, words: List<Word>) {
         pageWords[page] = words
@@ -620,6 +665,7 @@ class PdfDocView @JvmOverloads constructor(
             }
             drawWidgets(canvas, i, r)
             drawItems(canvas, i, r)
+            drawSearchHits(canvas, i, r)
         }
         // prefetch neighbours
         if (range.last + 1 < geoms.size) requestBase(range.last + 1)
