@@ -26,4 +26,10 @@
     <color name="icon_tile_2">#DDF7F2</color>
     <color name="icon_tile_3">#FFEBDD</color>
     <color name="icon_tile_4">#EFE5FF</color>
+    <color name="glass_bg">#EBFFFFFF</color>
+    <color name="glass_stroke">#1F0E1116</color>
+    <color name="tile_idle">#0F2457F5</color>
+    <color name="viewer_bg_top">#E9EDF6</color>
+    <color name="viewer_bg_bottom">#D8DFEC</color>
+    <color name="dock_icon">#3A4255</color>
 </resources>
