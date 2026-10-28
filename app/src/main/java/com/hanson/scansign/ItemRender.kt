@@ -88,6 +88,10 @@ object ItemRender {
                 canvas.restore()
             }
             is TextItem -> {
+                if (item is ReplacedText) {
+                    val c = item.cover
+                    canvas.drawRect(x(c.left), y(c.top), x(c.right), y(c.bottom), Paint().apply { color = item.coverColor })
+                }
                 val (w, h) = TextRender.sizePt(item)
                 val l = x(item.fx); val t = y(item.fy)
                 canvas.save()
@@ -134,6 +138,12 @@ object ItemRender {
                         canvas.drawRect(box, Paint().apply { color = Color.WHITE })
                         if (selected) canvas.drawRect(box, Paint(Paint.ANTI_ALIAS_FLAG).apply {
                             style = Paint.Style.STROKE; strokeWidth = 1f; color = Color.LTGRAY
+                        })
+                    }
+                    ShapeKind.FILL -> {
+                        canvas.drawRect(box, Paint().apply { color = item.color })
+                        if (selected) canvas.drawRect(box, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                            style = Paint.Style.STROKE; strokeWidth = 1f; color = Color.GRAY
                         })
                     }
                     ShapeKind.HIGHLIGHT -> canvas.drawRect(box, Paint().apply {

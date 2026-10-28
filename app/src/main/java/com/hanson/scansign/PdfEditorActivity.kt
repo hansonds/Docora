@@ -31,6 +31,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.android.material.slider.Slider
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlin.coroutines.resume
@@ -116,7 +117,11 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                 out
             }
             if (f == null) Toast.makeText(this@PdfEditorActivity, "Could not open that picture", Toast.LENGTH_SHORT).show()
-            else addSignature(f, width = 0.45f)
+            else {
+                val target = pendingImageRect
+                pendingImageRect = null
+                if (target != null) placeImageIn(f, target.first, target.second) else addSignature(f, width = 0.45f)
+            }
         }
     }
 
@@ -194,6 +199,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() = when {
                 searching -> closeFind()
+                betaMode -> exitBeta()
                 fullscreen -> setFullscreen(false)
                 else -> confirmLeave()
             }
@@ -279,6 +285,12 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         pdf = p
         renderer = r
         resetSearch()
+        if (betaMode) {
+            // the file changed (e.g. after Save): read the pages again
+            doc.pickMode = false
+            doc.pickMode = true
+            doc.post { if (betaMode) analyzeAround(doc.currentPage()) }
+        }
         doc.setDocument(p.geoms, r, p.widgets, items)
         if (restorePage > 0) { val rp = restorePage; doc.post { doc.goToPage(rp) } }
         restorePage = -1
@@ -332,6 +344,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     // ---------------- viewer callbacks ----------------
 
     override fun onPageChanged(page: Int) {
+        if (betaMode) analyzeAround(page)
         pagePill.text = "${page + 1} / ${doc.pageCount}"
         if (fullscreen && pdf != null) {
             fade(pagePill, true)
@@ -423,6 +436,407 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         if (fullscreen) flashExit()
     }
 
+    // ---------------- Edit PDF (beta) ----------------
+
+    private var betaMode = false
+    private val betaHint: TextView by lazy { findViewById(R.id.betaHint) }
+    private val layouts = HashMap<Int, PageLayout>()
+    private val layoutJobs = HashMap<Int, kotlinx.coroutines.Deferred<PageLayout?>>()
+    private val pageBitmaps = LinkedHashMap<String, android.graphics.Bitmap>()
+    /** Where a "replace picture" should go once a photo is picked. */
+    private var pendingImageRect: Pair<Int, android.graphics.RectF>? = null
+
+    private fun enterBeta() {
+        if (!requireEditable()) return
+        if (fullscreen) setFullscreen(false)
+        if (searching) closeFind()
+        commitEdit()
+        doc.clearTextSelection()
+        doc.select(null)
+        betaMode = true
+        findViewById<View>(R.id.betaHeader).visibility = View.VISIBLE
+        buildBetaTools()
+        setTool(ActiveTool.BETA_TEXT)
+        analyzeAround(doc.currentPage())
+        if (!getSharedPreferences("hints", MODE_PRIVATE).getBoolean("beta_intro", false)) {
+            getSharedPreferences("hints", MODE_PRIVATE).edit().putBoolean("beta_intro", true).apply()
+            MaterialAlertDialogBuilder(this)
+                .setTitle("Edit PDF (beta)")
+                .setMessage("Change the PDF itself:\n\n" +
+                    "• Tap any text to rewrite it — the old words are covered and the new ones are written in a matching style\n" +
+                    "• Tap a picture to move, resize, replace or delete it\n" +
+                    "• Find & replace words across the whole document\n" +
+                    "• Black out private details\n\n" +
+                    "Works on scanned pages too. Nothing changes until you tap Save, and Undo works for everything.\n\n" +
+                    "This is a beta: the new text uses the closest available font, so check the result before sending.")
+                .setPositiveButton("Got it", null)
+                .show()
+        }
+    }
+
+    private fun exitBeta() {
+        if (!betaMode) return
+        betaMode = false
+        doc.pickMode = false
+        doc.pickFocus = null
+        findViewById<View>(R.id.betaHeader).visibility = View.GONE
+        buildNormalTools()
+        setTool(ActiveTool.NONE)
+        markActiveTool()
+    }
+
+    private fun buildBetaTools() {
+        val bar = findViewById<LinearLayout>(R.id.tools)
+        bar.removeAllViews()
+        toolViews.clear()
+        toolButton(bar, "Edit text", R.drawable.ic_edit_doc, ActiveTool.BETA_TEXT) { setTool(ActiveTool.BETA_TEXT) }
+        toolButton(bar, "Pictures", R.drawable.ic_image, ActiveTool.BETA_IMAGE) { setTool(ActiveTool.BETA_IMAGE) }
+        toolButton(bar, "Replace", R.drawable.ic_find_replace) { setTool(ActiveTool.BETA_TEXT); findReplaceDialog() }
+        toolButton(bar, "Add text", R.drawable.ic_text) { setTool(ActiveTool.BETA_TEXT); textDialog(null) }
+        toolButton(bar, "Add image", R.drawable.ic_photo) {
+            setTool(ActiveTool.BETA_TEXT)
+            pendingImageRect = null
+            pickImage.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+        }
+        toolButton(bar, "Black out", R.drawable.ic_redact, ActiveTool.BLACKOUT) { setTool(ActiveTool.BLACKOUT) }
+        toolButton(bar, "Erase", R.drawable.ic_eraser, ActiveTool.WHITEOUT) { setTool(ActiveTool.WHITEOUT) }
+        dockDivider(bar)
+        toolButton(bar, "Sign", R.drawable.ic_sign) {
+            setTool(ActiveTool.BETA_TEXT); pendingSigWidget = null; pickSignature.launch(SignaturesActivity.intent(this, pick = true))
+        }
+        toolButton(bar, "Draw", R.drawable.ic_draw, ActiveTool.PEN) { setTool(ActiveTool.PEN) }
+        toolButton(bar, "Highlight", R.drawable.ic_highlight, ActiveTool.HIGHLIGHT) { setTool(ActiveTool.HIGHLIGHT) }
+        toolButton(bar, "Pages", R.drawable.ic_pages) { openPages() }
+        markActiveTool()
+    }
+
+    /** Reads the text and pictures on the page being viewed (and its neighbours) in the background. */
+    private fun analyzeAround(page: Int) {
+        val p = pdf ?: return
+        for (i in (page - 1)..(page + 1)) {
+            if (i !in p.geoms.indices) continue
+            lifecycleScope.launch {
+                val lay = layoutFor(i) ?: return@launch
+                if (betaMode) doc.setPickOutlines(i, lay.lines.map { it.rect }, lay.images.map { it.rect })
+            }
+        }
+    }
+
+    /** Text lines, paragraphs and pictures of a page (PDF text, or OCR for scanned pages). */
+    private suspend fun layoutFor(page: Int): PageLayout? {
+        layouts[page]?.let { return it }
+        val p = pdf ?: return null
+        val job = layoutJobs.getOrPut(page) {
+            lifecycleScope.async {
+                var lay = withContext(Dispatchers.IO) {
+                    searchLock.withLock {
+                        try {
+                            val d = searchDoc ?: com.tom_roush.pdfbox.pdmodel.PDDocument.load(p.displayFile, "", PdfOpener.memory())
+                                .also { searchDoc = it }
+                            BetaEdit.pdfLayout(d, page, p.geoms[page])
+                        } catch (e: Throwable) {
+                            if (e is kotlinx.coroutines.CancellationException) throw e
+                            null
+                        }
+                    }
+                }
+                val chars = lay?.lines?.sumOf { l -> l.text.count { !it.isWhitespace() } } ?: 0
+                if (chars < 12) {
+                    // a scanned page: read the words with on-device OCR
+                    val words = doc.pageWords(page) ?: ocrPage(page)
+                    if (!words.isNullOrEmpty()) {
+                        val ocr = BetaEdit.ocrLayout(page, words, p.geoms[page])
+                        lay = PageLayout(page, ocr.lines, ocr.blocks, lay?.images ?: emptyList(), scanned = true)
+                    }
+                }
+                lay?.also { layouts[page] = it }
+            }
+        }
+        return try { job.await() } finally { layoutJobs.remove(page) }
+    }
+
+    /** The page as a picture (for matching colours and copying images). */
+    private suspend fun pageBitmap(page: Int, width: Int): android.graphics.Bitmap? {
+        val key = "$page@$width"
+        pageBitmaps[key]?.let { return it }
+        val r = renderer ?: return null
+        val bmp = kotlinx.coroutines.suspendCancellableCoroutine<android.graphics.Bitmap?> { cont ->
+            r.renderPage(page, width, stillWanted = { cont.isActive }) { b -> if (cont.isActive) cont.resume(b) else b?.recycle() }
+        } ?: return null
+        pageBitmaps[key] = bmp
+        while (pageBitmaps.size > 3) {
+            val first = pageBitmaps.keys.first()
+            pageBitmaps.remove(first)
+        }
+        return bmp
+    }
+
+    private fun clearBetaCaches() {
+        layouts.clear()
+        layoutJobs.clear()
+        pageBitmaps.clear()
+    }
+
+    override fun onPagePick(page: Int, fx: Float, fy: Float) {
+        if (!betaMode) return
+        val p = pdf ?: return
+        lifecycleScope.launch {
+            val lay = layoutFor(page)
+            if (lay == null) { Toast.makeText(this@PdfEditorActivity, "Couldn't read this page", Toast.LENGTH_SHORT).show(); return@launch }
+            val slopX = 10 * resources.displayMetrics.density / doc.pageScreenWidth(page)
+            val slopY = slopX * p.geoms[page].dispW / p.geoms[page].dispH
+            val line = lay.lineAt(fx, fy, slopX, slopY)
+            val img = lay.imageAt(fx, fy)
+            when {
+                active == ActiveTool.BETA_IMAGE && img != null -> imageMenu(img)
+                active == ActiveTool.BETA_IMAGE -> Toast.makeText(this@PdfEditorActivity, "No picture here — pictures have orange dashed boxes", Toast.LENGTH_SHORT).show()
+                line != null -> editTextDialog(lay, line)
+                img != null -> imageMenu(img)
+                else -> Toast.makeText(this@PdfEditorActivity,
+                    if (lay.lines.isEmpty()) "No text found on this page" else "No text here — use Add text to write something new",
+                    Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    /** Rewrites one line or a whole paragraph. */
+    private fun editTextDialog(lay: PageLayout, line: TextLine) {
+        val p = pdf ?: return
+        val g = p.geoms[lay.page]
+        val block = lay.blockOf(line)
+        var whole = false
+        fun chosen() = if (whole) block.lines else listOf(line)
+        fun original() = chosen().joinToString("\n") { it.text }
+        fun rect() = android.graphics.RectF(chosen()[0].rect).also { r -> chosen().forEach { r.union(it.rect) } }
+        doc.pickFocus = Pair(lay.page, rect())
+
+        val d = resources.displayMetrics.density
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val input = EditText(this).apply {
+            setText(original())
+            setSelection(text.length)
+            minLines = 1; maxLines = 8
+            textSize = 17f
+            importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
+        }
+        box.addView(input)
+        if (block.lines.size > 1) {
+            box.addView(com.google.android.material.materialswitch.MaterialSwitch(this).apply {
+                text = "Whole paragraph (${block.lines.size} lines)"
+                setOnCheckedChangeListener { _, on ->
+                    whole = on
+                    input.setText(original())
+                    input.setSelection(input.text.length)
+                    doc.pickFocus = Pair(lay.page, rect())
+                }
+            })
+        }
+        var font = line.font
+        val fonts = com.google.android.material.chip.ChipGroup(this).apply { isSingleSelection = true; isSelectionRequired = true }
+        for (f in TextFont.values()) {
+            fonts.addView(Chip(this).apply {
+                id = View.generateViewId(); text = f.label; isCheckable = true; tag = f; isChecked = f == font
+            })
+        }
+        fonts.setOnCheckedStateChangeListener { gr, ids -> ids.firstOrNull()?.let { gr.findViewById<Chip>(it) }?.let { font = it.tag as TextFont } }
+        box.addView(fonts)
+        val bold = android.widget.CheckBox(this).apply { text = "Bold"; isChecked = line.bold }
+        box.addView(bold)
+        box.addView(TextView(this).apply {
+            text = "Detected: ${"%.1f".format(line.sizePt)} pt" + (if (lay.scanned) " · read from scan" else "") +
+                "\nTap the new text afterwards to change size or colour, or drag to move it."
+            textSize = 12f
+            setTextColor(androidx.core.content.ContextCompat.getColor(this@PdfEditorActivity, R.color.md_on_surface_variant))
+            setPadding(0, (6 * d).toInt(), 0, 0)
+        })
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Edit text")
+            .setView(padded(box))
+            .setPositiveButton("Apply") { _, _ ->
+                val newText = input.text.toString().trimEnd()
+                if (newText == original() && font == line.font && bold.isChecked == line.bold) { doc.pickFocus = null; return@setPositiveButton }
+                applyTextChange(lay.page, g, chosen(), newText, font, bold.isChecked)
+            }
+            .setNeutralButton("Delete text") { _, _ -> applyTextChange(lay.page, g, chosen(), "", font, bold.isChecked) }
+            .setNegativeButton("Cancel") { _, _ -> doc.pickFocus = null }
+            .setOnCancelListener { doc.pickFocus = null }
+            .show()
+        input.requestFocus()
+    }
+
+    /** Covers [lines] with the page colour and writes [text] in their place ("" = just delete). */
+    private fun applyTextChange(page: Int, g: PageGeom, lines: List<TextLine>, text: String, font: TextFont, bold: Boolean) {
+        lifecycleScope.launch {
+            val bmp = pageBitmap(page, 1400)
+            val area = android.graphics.RectF(lines[0].rect).also { r -> lines.forEach { r.union(it.rect) } }
+            val size = lines.map { it.sizePt }.sorted()[lines.size / 2]
+            val cover = BetaEdit.coverFor(area, size, g)
+            val bg = bmp?.let { BetaEdit.backgroundAround(it, cover) } ?: Color.WHITE
+            val ink = bmp?.let { BetaEdit.inkInside(it, area, bg) } ?: Color.BLACK
+            val item: EditItem = if (text.isEmpty()) {
+                ShapeItem(page, ShapeKind.FILL, cover.left, cover.top, cover.width(), cover.height(), bg, 1f)
+            } else {
+                val gap = if (lines.size > 1) ((lines.last().baseline - lines[0].baseline) / (lines.size - 1) * g.dispH / size).coerceIn(0.9f, 3f)
+                else TextRender.LINE
+                ReplacedText(page, text, ink, size, bold, font, area.left, lines[0].baseline - size * TextRender.ASCENT / g.dispH, gap, cover, bg)
+            }
+            items.add(item)
+            record()
+            doc.pickFocus = null
+            doc.refresh()
+            if (item is ReplacedText) {
+                doc.select(item)
+                hintOnce("beta_text_hint", "Drag to move · tap again to change size, colour or wording · Undo to go back")
+            }
+        }
+    }
+
+    /** Move / resize, replace or delete a picture that is part of the PDF. */
+    private fun imageMenu(img: ImageBox) {
+        val p = pdf ?: return
+        doc.pickFocus = Pair(img.page, img.rect)
+        val opts = arrayOf<CharSequence>("Move or resize", "Replace with another picture", "Delete picture")
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Picture")
+            .setItems(opts) { _, which ->
+                lifecycleScope.launch {
+                    val g = p.geoms[img.page]
+                    val bmp = pageBitmap(img.page, 2000)
+                    val r = android.graphics.RectF(img.rect)
+                    val pad = 1.5f / g.dispW
+                    val cover = android.graphics.RectF(r.left - pad, r.top - pad, r.right + pad, r.bottom + pad)
+                    val bg = bmp?.let { BetaEdit.backgroundAround(it, cover) } ?: Color.WHITE
+                    val coverItem = ShapeItem(img.page, ShapeKind.FILL, cover.left, cover.top, cover.width(), cover.height(), bg, 1f)
+                    when (which) {
+                        0 -> {
+                            val piece = bmp?.let { BetaEdit.crop(it, r) }
+                            if (piece == null) { Toast.makeText(this@PdfEditorActivity, "Couldn't copy this picture", Toast.LENGTH_SHORT).show(); return@launch }
+                            val file = withContext(Dispatchers.IO) {
+                                Storage.newWorkFile(this@PdfEditorActivity, "png").also { ImageUtils.savePng(piece, it) }
+                            }
+                            items.add(coverItem)
+                            val item = SignatureItem(img.page, file, r.left, r.top, r.width(), r.height())
+                            items.add(item)
+                            record()
+                            doc.pickFocus = null
+                            doc.select(item)
+                            hintOnce("beta_img_hint", "Drag to move · pinch or the blue dot to resize · rotate with the round handle")
+                        }
+                        1 -> {
+                            items.add(coverItem)
+                            record()
+                            doc.pickFocus = null
+                            pendingImageRect = Pair(img.page, r)
+                            pickImage.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        }
+                        else -> {
+                            items.add(coverItem)
+                            record()
+                            doc.pickFocus = null
+                            doc.refresh()
+                        }
+                    }
+                }
+            }
+            .setNegativeButton("Cancel") { _, _ -> doc.pickFocus = null }
+            .setOnCancelListener { doc.pickFocus = null }
+            .show()
+    }
+
+    /** A new picture fitted into the place of an old one. */
+    private fun placeImageIn(file: File, page: Int, r: android.graphics.RectF) {
+        val size = doc.pageSizePt(page)
+        val aspect = sigAspect(file) * size.x / size.y          // height / width in page fractions
+        var fw = r.width(); var fh = fw * aspect
+        if (fh > r.height()) { fh = r.height(); fw = fh / aspect }
+        val item = SignatureItem(page, file, r.centerX() - fw / 2, r.centerY() - fh / 2, fw, fh)
+        items.add(item)
+        record()
+        doc.select(item)
+    }
+
+    /** Replaces a word or phrase everywhere in the document. */
+    private fun findReplaceDialog() {
+        val p = pdf ?: return
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val find = EditText(this).apply { hint = "Find"; maxLines = 1; inputType = android.text.InputType.TYPE_CLASS_TEXT }
+        val repl = EditText(this).apply { hint = "Replace with (empty = delete)"; maxLines = 1; inputType = android.text.InputType.TYPE_CLASS_TEXT }
+        val matchCase = android.widget.CheckBox(this).apply { text = "Match case" }
+        box.addView(find); box.addView(repl); box.addView(matchCase)
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Find & replace")
+            .setView(padded(box))
+            .setPositiveButton("Replace all") { _, _ ->
+                val q = find.text.toString()
+                if (q.isBlank()) return@setPositiveButton
+                runReplaceAll(p, q, repl.text.toString(), matchCase.isChecked)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+        find.requestFocus()
+    }
+
+    private fun runReplaceAll(p: OpenedPdf, query: String, replacement: String, matchCase: Boolean) {
+        val view = LayoutInflater.from(this).inflate(R.layout.dialog_progress, null)
+        val text = view.findViewById<TextView>(R.id.progressText)
+        val bar = view.findViewById<com.google.android.material.progressindicator.LinearProgressIndicator>(R.id.progressBar)
+        var cancelled = false
+        val dlg = MaterialAlertDialogBuilder(this).setTitle("Replacing…").setView(view)
+            .setNegativeButton("Stop") { _, _ -> cancelled = true }.setCancelable(false).show()
+        lifecycleScope.launch {
+            val n = p.geoms.size
+            bar.isIndeterminate = false
+            bar.max = n
+            var count = 0
+            val pages = HashSet<Int>()
+            val added = ArrayList<EditItem>()
+            for (page in 0 until n) {
+                if (cancelled) break
+                text.text = "Page ${page + 1} of $n · $count found"
+                bar.setProgressCompat(page, true)
+                val lay = layoutFor(page) ?: continue
+                val g = p.geoms[page]
+                var bmp: android.graphics.Bitmap? = null
+                for (line in lay.lines) {
+                    var from = 0
+                    while (true) {
+                        val i = line.text.indexOf(query, from, ignoreCase = !matchCase)
+                        if (i < 0) break
+                        val j = i + query.length - 1
+                        from = i + query.length
+                        if (bmp == null) bmp = pageBitmap(page, 1400)
+                        val area = android.graphics.RectF(line.xs[i], line.top, line.xe[j], line.bottom)
+                        val cover = BetaEdit.coverFor(area, line.sizePt, g)
+                        val bg = bmp?.let { BetaEdit.backgroundAround(it, cover) } ?: Color.WHITE
+                        val ink = bmp?.let { BetaEdit.inkInside(it, area, bg) } ?: Color.BLACK
+                        added.add(
+                            if (replacement.isEmpty()) ShapeItem(page, ShapeKind.FILL, cover.left, cover.top, cover.width(), cover.height(), bg, 1f)
+                            else ReplacedText(page, replacement, ink, line.sizePt, line.bold, line.font, area.left,
+                                line.baseline - line.sizePt * TextRender.ASCENT / g.dispH, TextRender.LINE, cover, bg)
+                        )
+                        count++
+                        pages.add(page)
+                    }
+                }
+            }
+            try { dlg.dismiss() } catch (_: Throwable) {}
+            if (added.isNotEmpty()) {
+                items.addAll(added)
+                record()
+                doc.refresh()
+            }
+            val msg = when (count) {
+                0 -> "\"$query\" wasn't found"
+                1 -> "Replaced 1 time"
+                else -> "Replaced $count times on ${pages.size} page${if (pages.size == 1) "" else "s"}"
+            }
+            MaterialAlertDialogBuilder(this@PdfEditorActivity).setTitle("Find & replace").setMessage(
+                msg + if (count > 0) "\n\nCheck the pages, then tap Save. Undo reverses it." else ""
+            ).setPositiveButton("OK", null).show()
+        }
+    }
+
     // ---------------- find in document ----------------
 
     private lateinit var findBar: View
@@ -475,6 +889,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
 
     private fun openFind() {
         if (pdf == null || searching) return
+        if (betaMode) exitBeta()
         if (fullscreen) setFullscreen(false)
         commitEdit()
         setTool(ActiveTool.NONE)
@@ -518,6 +933,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     private fun resetSearch() {
         findJob?.cancel()
         pageTexts.clear()
+        clearBetaCaches()
         hits.clear()
         currentHit = null
         lastQuery = ""
@@ -683,6 +1099,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     /** Full-screen reading: hides the bars, controls and the phone's status/navigation bars. */
     private fun setFullscreen(on: Boolean) {
         if (on == fullscreen) return
+        if (on && betaMode) exitBeta()
         if (on) { commitEdit(); setTool(ActiveTool.NONE); doc.clearTextSelection() }
         fullscreen = on
         val ctl = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
@@ -947,8 +1364,9 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             .setPositiveButton(if (existing == null) "Add" else "Done") { _, _ ->
                 val text = input.text.toString().trimEnd()
                 if (text.isBlank()) return@setPositiveButton
-                val sizePt = slider.value
-                prefs.edit().putInt("color", color).putFloat("size", sizePt)
+                // an untouched slider keeps the exact size (detected sizes aren't whole numbers)
+                val sizePt = if (existing != null && slider.value == size.coerceIn(6f, 72f).toInt().toFloat()) existing.sizePt else slider.value
+                if (existing !is ReplacedText) prefs.edit().putInt("color", color).putFloat("size", sizePt)
                     .putBoolean("bold", bold.isChecked).putString("font", font.name).apply()
                 if (existing != null) {
                     existing.text = text
@@ -964,7 +1382,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             }
             .setNegativeButton("Cancel", null)
         if (existing != null) {
-            builder.setNeutralButton("Delete") { _, _ ->
+            builder.setNeutralButton(if (existing is ReplacedText) "Restore original" else "Delete") { _, _ ->
                 items.remove(existing)
                 doc.select(null)
                 record()
@@ -1095,13 +1513,14 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     private lateinit var widthLabel: TextView
     private var toolColor = Color.rgb(16, 48, 160)
     private var shapeKind = ShapeKind.RECT
-    private enum class ActiveTool { NONE, PEN, HIGHLIGHT, SHAPE, WHITEOUT }
+    private enum class ActiveTool { NONE, PEN, HIGHLIGHT, SHAPE, WHITEOUT, BETA_TEXT, BETA_IMAGE, BLACKOUT }
     private var active = ActiveTool.NONE
 
     private val toolViews = HashMap<ActiveTool, View>()
 
-    private fun toolButton(parent: LinearLayout, label: String, icon: Int, tool: ActiveTool? = null, onClick: () -> Unit) {
+    private fun toolButton(parent: LinearLayout, label: String, icon: Int, tool: ActiveTool? = null, beta: Boolean = false, onClick: () -> Unit) {
         val b = LayoutInflater.from(this).inflate(R.layout.view_dock_tool, parent, false)
+        if (beta) b.findViewById<View>(R.id.toolBadge).visibility = View.VISIBLE
         b.findViewById<android.widget.ImageView>(R.id.toolIcon).setImageResource(icon)
         b.findViewById<TextView>(R.id.toolLabel).text = label
         b.contentDescription = label
@@ -1162,10 +1581,19 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             ids.firstOrNull()?.let { g.findViewById<Chip>(it) }?.let { shapeKind = it.tag as ShapeKind; applyTool() }
         }
 
+        findViewById<View>(R.id.betaDone).setOnClickListener { exitBeta() }
+        findViewById<View>(R.id.betaSave).setOnClickListener { if (requireEditable()) quickSave() }
+        buildNormalTools()
+    }
+
+    private fun buildNormalTools() {
         val bar = findViewById<LinearLayout>(R.id.tools)
+        bar.removeAllViews()
+        toolViews.clear()
         toolButton(bar, "Sign", R.drawable.ic_sign) {
             if (requireEditable()) { setTool(ActiveTool.NONE); pendingSigWidget = null; pickSignature.launch(SignaturesActivity.intent(this, pick = true)) }
         }
+        toolButton(bar, "Edit PDF", R.drawable.ic_edit_doc, beta = true) { enterBeta() }
         toolButton(bar, "Text", R.drawable.ic_text) { if (requireEditable()) { setTool(ActiveTool.NONE); textDialog(null) } }
         toolButton(bar, "Draw", R.drawable.ic_draw, ActiveTool.PEN) { if (requireEditable()) setTool(ActiveTool.PEN) }
         toolButton(bar, "Highlight", R.drawable.ic_highlight, ActiveTool.HIGHLIGHT) { if (requireEditable()) setTool(ActiveTool.HIGHLIGHT) }
@@ -1185,13 +1613,24 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         markActiveTool()
     }
 
-    private fun setTool(t: ActiveTool) {
+    private fun setTool(tool: ActiveTool) {
         commitEdit()
+        // in the beta editor "no tool" means tapping text to edit it
+        val t = if (betaMode && tool == ActiveTool.NONE) ActiveTool.BETA_TEXT else tool
         active = t
         val prefs = getSharedPreferences("tools", MODE_PRIVATE)
-        toolOptions.visibility = if (t == ActiveTool.NONE) View.GONE else View.VISIBLE
+        val picking = t == ActiveTool.BETA_TEXT || t == ActiveTool.BETA_IMAGE
+        doc.pickMode = betaMode
+        if (!picking) doc.pickFocus = null
+        if (betaMode) betaHint.text = when (t) {
+            ActiveTool.BETA_IMAGE -> "Tap a picture to move, resize, replace or delete it"
+            ActiveTool.BLACKOUT -> "Drag over anything to black it out (hides it on the page; the text may still be copyable)"
+            ActiveTool.WHITEOUT -> "Drag to erase an area"
+            else -> "Tap any text to change it · dashed boxes show what can be edited"
+        }
+        toolOptions.visibility = if (t == ActiveTool.NONE || picking) View.GONE else View.VISIBLE
         findViewById<View>(R.id.shapeScroll).visibility = if (t == ActiveTool.SHAPE) View.VISIBLE else View.GONE
-        val showStyle = t != ActiveTool.WHITEOUT
+        val showStyle = t != ActiveTool.WHITEOUT && t != ActiveTool.BLACKOUT
         toolColors.visibility = if (showStyle) View.VISIBLE else View.GONE
         (toolWidth.parent as View).visibility = if (showStyle) View.VISIBLE else View.GONE
         when (t) {
@@ -1214,7 +1653,8 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                 buildColors(PEN_COLORS)
             }
             ActiveTool.WHITEOUT -> toolTitle.text = "Whiteout — drag to cover text or marks"
-            ActiveTool.NONE -> {}
+            ActiveTool.BLACKOUT -> toolTitle.text = "Black out — drag over text or pictures to hide them"
+            ActiveTool.NONE, ActiveTool.BETA_TEXT, ActiveTool.BETA_IMAGE -> {}
         }
         widthLabel.text = "Size ${"%.1f".format(toolWidth.value)}"
         applyTool()
@@ -1225,7 +1665,8 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         val w = toolWidth.value
         val prefs = getSharedPreferences("tools", MODE_PRIVATE).edit()
         doc.tool = when (active) {
-            ActiveTool.NONE -> PdfDocView.Tool.None
+            ActiveTool.NONE, ActiveTool.BETA_TEXT, ActiveTool.BETA_IMAGE -> PdfDocView.Tool.None
+            ActiveTool.BLACKOUT -> PdfDocView.Tool.Shape(ShapeKind.FILL, Color.BLACK, 1f)
             ActiveTool.PEN -> { prefs.putInt("pen_color", toolColor).putFloat("pen_width", w); PdfDocView.Tool.Pen(toolColor, w, 1f) }
             ActiveTool.HIGHLIGHT -> { prefs.putInt("hl_color", toolColor).putFloat("hl_width", w); PdfDocView.Tool.Pen(toolColor, w, 0.35f) }
             ActiveTool.SHAPE -> {
