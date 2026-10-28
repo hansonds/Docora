@@ -31,6 +31,35 @@ object TextRender {
         typeface = typeface(item.font, item.bold)
         textSize = item.sizePt * pxPerPt
         color = item.color
+        textScaleX = item.scaleX
+    }
+
+    /**
+     * Breaks [text] into lines no wider than [widthPt] (word by word; very long words are split),
+     * keeping the user's own line breaks.
+     */
+    fun wrap(item: TextItem, text: String, widthPt: Float): String {
+        if (widthPt <= 0f) return text
+        val p = paint(item, 1f)
+        val out = ArrayList<String>()
+        for (para in text.split('\n')) {
+            var line = ""
+            for (word in para.split(' ')) {
+                val cand = if (line.isEmpty()) word else "$line $word"
+                if (p.measureText(cand) <= widthPt || line.isEmpty() && p.measureText(word) <= widthPt) { line = cand; continue }
+                if (line.isNotEmpty()) out.add(line)
+                // a word longer than the whole width: split it
+                var w = word
+                while (p.measureText(w) > widthPt && w.length > 1) {
+                    var n = w.length - 1
+                    while (n > 1 && p.measureText(w.substring(0, n)) > widthPt) n--
+                    out.add(w.substring(0, n)); w = w.substring(n)
+                }
+                line = w
+            }
+            out.add(line)
+        }
+        return out.joinToString("\n")
     }
 
     /** Width and height of the text box in points. */

@@ -198,6 +198,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() = when {
+                typing != null -> finishTyping(true)
                 searching -> closeFind()
                 betaMode -> exitBeta()
                 fullscreen -> setFullscreen(false)
@@ -354,7 +355,8 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     }
 
     override fun onItemTapped(item: EditItem) {
-        if (item is TextItem) textDialog(item)
+        if (betaMode && item is ReplacedText) startTyping(item)
+        else if (item is TextItem) textDialog(item)
     }
 
     override fun onItemsChanged() {
@@ -368,6 +370,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     override fun onSelectionChanged(item: EditItem?) {}
 
     override fun onViewportChanged() {
+        positionTyping()
         positionEditor()
         positionTextBar()
     }
@@ -432,6 +435,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     }
 
     override fun onAnyTap() {
+        if (typing != null) finishTyping(true)
         if (editingWidget != null) commitEdit()
         if (fullscreen) flashExit()
     }
@@ -476,6 +480,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
 
     private fun exitBeta() {
         if (!betaMode) return
+        finishTyping(true)
         betaMode = false
         doc.pickMode = false
         doc.pickFocus = null
@@ -590,7 +595,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             when {
                 active == ActiveTool.BETA_IMAGE && img != null -> imageMenu(img)
                 active == ActiveTool.BETA_IMAGE -> Toast.makeText(this@PdfEditorActivity, "No picture here — pictures have orange dashed boxes", Toast.LENGTH_SHORT).show()
-                line != null -> editTextDialog(lay, line)
+                line != null -> startTyping(lay, line)
                 img != null -> imageMenu(img)
                 else -> Toast.makeText(this@PdfEditorActivity,
                     if (lay.lines.isEmpty()) "No text found on this page" else "No text here — use Add text to write something new",
@@ -599,97 +604,236 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         }
     }
 
-    /** Rewrites one line or a whole paragraph. */
-    private fun editTextDialog(lay: PageLayout, line: TextLine) {
-        val p = pdf ?: return
-        val g = p.geoms[lay.page]
-        val block = lay.blockOf(line)
-        var whole = false
-        fun chosen() = if (whole) block.lines else listOf(line)
-        fun original() = chosen().joinToString("\n") { it.text }
-        fun rect() = android.graphics.RectF(chosen()[0].rect).also { r -> chosen().forEach { r.union(it.rect) } }
-        doc.pickFocus = Pair(lay.page, rect())
+    // ---- typing straight onto the page ----
 
-        val d = resources.displayMetrics.density
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val input = EditText(this).apply {
-            setText(original())
-            setSelection(text.length)
-            minLines = 1; maxLines = 8
-            textSize = 17f
-            importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
-        }
-        box.addView(input)
-        if (block.lines.size > 1) {
-            box.addView(com.google.android.material.materialswitch.MaterialSwitch(this).apply {
-                text = "Whole paragraph (${block.lines.size} lines)"
-                setOnCheckedChangeListener { _, on ->
-                    whole = on
-                    input.setText(original())
-                    input.setSelection(input.text.length)
-                    doc.pickFocus = Pair(lay.page, rect())
-                }
-            })
-        }
-        var font = line.font
-        val fonts = com.google.android.material.chip.ChipGroup(this).apply { isSingleSelection = true; isSelectionRequired = true }
-        for (f in TextFont.values()) {
-            fonts.addView(Chip(this).apply {
-                id = View.generateViewId(); text = f.label; isCheckable = true; tag = f; isChecked = f == font
-            })
-        }
-        fonts.setOnCheckedStateChangeListener { gr, ids -> ids.firstOrNull()?.let { gr.findViewById<Chip>(it) }?.let { font = it.tag as TextFont } }
-        box.addView(fonts)
-        val bold = android.widget.CheckBox(this).apply { text = "Bold"; isChecked = line.bold }
-        box.addView(bold)
-        box.addView(TextView(this).apply {
-            text = "Detected: ${"%.1f".format(line.sizePt)} pt" + (if (lay.scanned) " · read from scan" else "") +
-                "\nTap the new text afterwards to change size or colour, or drag to move it."
-            textSize = 12f
-            setTextColor(androidx.core.content.ContextCompat.getColor(this@PdfEditorActivity, R.color.md_on_surface_variant))
-            setPadding(0, (6 * d).toInt(), 0, 0)
-        })
+    private var typing: ReplacedText? = null
+    private var typingIsNew = false
+    private var typingBackup: ReplacedText? = null
+    private var typingLay: PageLayout? = null
+    private var typingLine: TextLine? = null
+    private var typingWhole = false
+    private var typingOriginal = ""
+    private var typingInk = Color.BLACK
+    private val typeBox: EditText by lazy { findViewById(R.id.typeBox) }
 
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Edit text")
-            .setView(padded(box))
-            .setPositiveButton("Apply") { _, _ ->
-                val newText = input.text.toString().trimEnd()
-                if (newText == original() && font == line.font && bold.isChecked == line.bold) { doc.pickFocus = null; return@setPositiveButton }
-                applyTextChange(lay.page, g, chosen(), newText, font, bold.isChecked)
-            }
-            .setNeutralButton("Delete text") { _, _ -> applyTextChange(lay.page, g, chosen(), "", font, bold.isChecked) }
-            .setNegativeButton("Cancel") { _, _ -> doc.pickFocus = null }
-            .setOnCancelListener { doc.pickFocus = null }
-            .show()
-        input.requestFocus()
+    /** A replacement for [lines] that looks like the original: same place, size, ink, spacing and letter width. */
+    private suspend fun buildReplacement(page: Int, lines: List<TextLine>, text: String, font: TextFont, bold: Boolean): ReplacedText {
+        val g = pdf!!.geoms[page]
+        val bmp = pageBitmap(page, 1400)
+        val area = android.graphics.RectF(lines[0].rect).also { r -> lines.forEach { r.union(it.rect) } }
+        val size = lines.map { it.sizePt }.sorted()[lines.size / 2]
+        val cover = BetaEdit.coverFor(area, size, g)
+        val bg = bmp?.let { BetaEdit.backgroundAround(it, cover) } ?: Color.WHITE
+        val ink = bmp?.let { BetaEdit.inkInside(it, area, bg) } ?: Color.BLACK
+        val gap = if (lines.size > 1) ((lines.last().baseline - lines[0].baseline) / (lines.size - 1) * g.dispH / size).coerceIn(0.9f, 3f)
+        else TextRender.LINE
+        // letter width: make the stand-in font as wide as the original words
+        val probe = TextItem(page, "", ink, size, bold, font, 0f, 0f)
+        val p = TextRender.paint(probe, 1f)
+        var natural = 0f; var actual = 0f
+        for (l in lines) {
+            if (l.text.length < 3) continue
+            natural += p.measureText(l.text)
+            actual += ((l.xe.last() - l.xs.first()) * g.dispW)
+        }
+        val scale = if (natural > 0f) (actual / natural).coerceIn(0.75f, 1.25f) else 1f
+        val wrapPt = area.width() * g.dispW * 1.03f + size * 0.3f
+        return ReplacedText(page, text, ink, size, bold, font, area.left, lines[0].baseline - size * TextRender.ASCENT / g.dispH,
+            gap, cover, bg, scale, wrapPt, text)
     }
 
-    /** Covers [lines] with the page colour and writes [text] in their place ("" = just delete). */
-    private fun applyTextChange(page: Int, g: PageGeom, lines: List<TextLine>, text: String, font: TextFont, bold: Boolean) {
+    /** Paragraph lines joined into running text (a hyphen at a line end joins the word). */
+    private fun joinLines(lines: List<TextLine>): String {
+        val sb = StringBuilder()
+        for (l in lines) {
+            val s = l.text.trim()
+            if (sb.isEmpty()) sb.append(s)
+            else if (sb.endsWith("-")) { sb.setLength(sb.length - 1); sb.append(s) }
+            else sb.append(' ').append(s)
+        }
+        return sb.toString()
+    }
+
+    /** Tap on original text: type over it right there on the page. */
+    private fun startTyping(lay: PageLayout, line: TextLine) {
+        commitEdit()
         lifecycleScope.launch {
-            val bmp = pageBitmap(page, 1400)
-            val area = android.graphics.RectF(lines[0].rect).also { r -> lines.forEach { r.union(it.rect) } }
-            val size = lines.map { it.sizePt }.sorted()[lines.size / 2]
-            val cover = BetaEdit.coverFor(area, size, g)
-            val bg = bmp?.let { BetaEdit.backgroundAround(it, cover) } ?: Color.WHITE
-            val ink = bmp?.let { BetaEdit.inkInside(it, area, bg) } ?: Color.BLACK
-            val item: EditItem = if (text.isEmpty()) {
-                ShapeItem(page, ShapeKind.FILL, cover.left, cover.top, cover.width(), cover.height(), bg, 1f)
-            } else {
-                val gap = if (lines.size > 1) ((lines.last().baseline - lines[0].baseline) / (lines.size - 1) * g.dispH / size).coerceIn(0.9f, 3f)
-                else TextRender.LINE
-                ReplacedText(page, text, ink, size, bold, font, area.left, lines[0].baseline - size * TextRender.ASCENT / g.dispH, gap, cover, bg)
-            }
+            val item = buildReplacement(lay.page, listOf(line), line.text, line.font, line.bold)
             items.add(item)
-            record()
-            doc.pickFocus = null
-            doc.refresh()
-            if (item is ReplacedText) {
-                doc.select(item)
-                hintOnce("beta_text_hint", "Drag to move · tap again to change size, colour or wording · Undo to go back")
+            typingIsNew = true
+            typingBackup = null
+            typingLay = lay; typingLine = line; typingWhole = false
+            typingOriginal = line.text
+            typingInk = item.color
+            showTyping(item)
+        }
+    }
+
+    /** Tap on text you already changed: keep editing it. */
+    private fun startTyping(item: ReplacedText) {
+        commitEdit()
+        doc.select(null)
+        typingIsNew = false
+        typingBackup = item.copy() as ReplacedText
+        typingLay = null; typingLine = null; typingWhole = false
+        typingOriginal = item.plain
+        typingInk = item.color
+        showTyping(item)
+    }
+
+    private fun showTyping(item: ReplacedText) {
+        typing = item
+        doc.select(null)
+        doc.pickFocus = null
+        doc.typingItem = item
+        findViewById<View>(R.id.betaHeader).visibility = View.GONE
+        findViewById<View>(R.id.toolsScroll).visibility = View.GONE
+        toolOptions.visibility = View.GONE
+        findViewById<View>(R.id.typeBar).visibility = View.VISIBLE
+        undoBox.visibility = View.INVISIBLE
+        buildTypeTools()
+        typeBox.setText(item.plain)
+        styleTypeBox()
+        typeBox.visibility = View.VISIBLE
+        // small text: zoom in so it's comfortable to type
+        doc.fracToScreen(item.page, item.cover)?.let { doc.zoomToFit(it, 30 * resources.displayMetrics.density) }
+        positionTyping()
+        typeBox.requestFocus()
+        typeBox.setSelection(typeBox.text.length)
+        typeBox.post {
+            (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(typeBox, InputMethodManager.SHOW_IMPLICIT)
+            typeBox.postDelayed({ typingScreenRect()?.let { doc.ensureVisible(it) } }, 350)
+        }
+        hintOnce("beta_type_hint", "Type the new words · the box keeps the original width · tap ✓ when done")
+    }
+
+    private fun typingScreenRect(): android.graphics.RectF? {
+        val item = typing ?: return null
+        val r = doc.fracToScreen(item.page, item.cover) ?: return null
+        r.bottom = kotlin.math.max(r.bottom, r.top + typeBox.height)
+        return r
+    }
+
+    /** Makes the typing box look exactly like the text will (font, size, ink, spacing). */
+    private fun styleTypeBox() {
+        val item = typing ?: return
+        val px = doc.pxPerPtOn(item.page)
+        typeBox.typeface = TextRender.typeface(item.font, item.bold)
+        typeBox.textScaleX = item.scaleX
+        typeBox.setTextColor(item.color)
+        typeBox.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, item.sizePt * px)
+        if (android.os.Build.VERSION.SDK_INT >= 28) typeBox.lineHeight = (item.lineGap * item.sizePt * px).toInt().coerceAtLeast(1)
+        else typeBox.setLineSpacing(0f, item.lineGap / 1.17f)
+    }
+
+    private fun positionTyping() {
+        val item = typing ?: return
+        if (typeBox.visibility != View.VISIBLE) return
+        val px = doc.pxPerPtOn(item.page)
+        val tl = doc.fracToScreen(item.page, android.graphics.RectF(item.fx, item.fy, item.fx, item.fy)) ?: return
+        val lp = typeBox.layoutParams as FrameLayout.LayoutParams
+        lp.gravity = android.view.Gravity.TOP or android.view.Gravity.START
+        lp.width = (item.wrapPt * px).toInt().coerceAtLeast((48 * resources.displayMetrics.density).toInt())
+        lp.leftMargin = tl.left.toInt()
+        lp.topMargin = tl.top.toInt()
+        typeBox.layoutParams = lp
+        // keep the text size in step with zoom
+        val want = item.sizePt * px
+        if (kotlin.math.abs(typeBox.textSize - want) > 0.5f) styleTypeBox()
+    }
+
+    /** Style buttons shown above the keyboard while typing. */
+    private fun buildTypeTools() {
+        val item = typing ?: return
+        val bar = findViewById<LinearLayout>(R.id.typeTools)
+        bar.removeAllViews()
+        fun chip(label: String, checked: Boolean? = null, onClick: (Chip) -> Unit) {
+            bar.addView(Chip(this).apply {
+                text = label
+                if (checked != null) { isCheckable = true; isChecked = checked }
+                setOnClickListener { onClick(this) }
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                    .apply { marginEnd = (6 * resources.displayMetrics.density).toInt() }
+            })
+        }
+        val lay = typingLay
+        val line = typingLine
+        if (typingIsNew && lay != null && line != null && lay.blockOf(line).lines.size > 1) {
+            chip("¶ Paragraph", typingWhole) { setTypingWhole(!typingWhole) }
+        }
+        chip("Aa ${item.font.label}") { c ->
+            item.font = TextFont.values()[(item.font.ordinal + 1) % TextFont.values().size]
+            c.text = "Aa ${item.font.label}"; styleTypeBox()
+        }
+        chip("Bold", item.bold) { item.bold = !item.bold; styleTypeBox() }
+        chip("A−") { item.sizePt = (item.sizePt * 0.92f).coerceAtLeast(3f); styleTypeBox() }
+        chip("A+") { item.sizePt = (item.sizePt * 1.08f).coerceAtMost(200f); styleTypeBox() }
+        val inks = intArrayOf(typingInk, Color.BLACK, Color.rgb(16, 48, 160), Color.rgb(200, 30, 45))
+        chip("● Colour") { item.color = inks[(inks.indexOf(item.color).coerceAtLeast(0) + 1) % inks.size]; styleTypeBox() }
+        chip("Delete") { typeBox.setText(""); finishTyping(true) }
+    }
+
+    /** Switches between rewriting one line and the whole paragraph. */
+    private fun setTypingWhole(whole: Boolean) {
+        val lay = typingLay ?: return
+        val line = typingLine ?: return
+        val old = typing ?: return
+        lifecycleScope.launch {
+            val lines = if (whole) lay.blockOf(line).lines else listOf(line)
+            val text = if (whole) joinLines(lines) else line.text
+            val item = buildReplacement(lay.page, lines, text, old.font, old.bold)
+            val i = items.indexOf(old)
+            if (i >= 0) items[i] = item else items.add(item)
+            typingWhole = whole
+            typingOriginal = text
+            typing = item
+            doc.typingItem = item
+            typeBox.setText(text)
+            typeBox.setSelection(typeBox.text.length)
+            styleTypeBox()
+            positionTyping()
+            buildTypeTools()
+        }
+    }
+
+    /** Ends typing: keeps the new words ([apply]) or puts things back. */
+    private fun finishTyping(apply: Boolean) {
+        val item = typing ?: return
+        typing = null
+        doc.typingItem = null
+        (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(typeBox.windowToken, 0)
+        typeBox.clearFocus()
+        typeBox.visibility = View.GONE
+        findViewById<View>(R.id.typeBar).visibility = View.GONE
+        findViewById<View>(R.id.toolsScroll).visibility = View.VISIBLE
+        if (betaMode) findViewById<View>(R.id.betaHeader).visibility = View.VISIBLE
+        undoBox.visibility = View.VISIBLE
+        setTool(active)
+        val raw = typeBox.text.toString().trimEnd()
+        val backup = typingBackup
+        when {
+            !apply -> {
+                if (typingIsNew) items.remove(item)
+                else if (backup != null) { val i = items.indexOf(item); if (i >= 0) items[i] = backup }
+            }
+            raw.isEmpty() -> {
+                // delete: just the cover remains
+                val i = items.indexOf(item)
+                val c = item.cover
+                val cover = ShapeItem(item.page, ShapeKind.FILL, c.left, c.top, c.width(), c.height(), item.coverColor, 1f)
+                if (i >= 0) items[i] = cover else items.add(cover)
+                record()
+            }
+            typingIsNew && raw == typingOriginal && backup == null && item.font == typingLine?.font &&
+                item.bold == typingLine?.bold && item.color == typingInk && !typingWhole -> items.remove(item)
+            else -> {
+                item.plain = raw
+                item.text = TextRender.wrap(item, raw, item.wrapPt)
+                record()
             }
         }
+        typingBackup = null
+        doc.refresh()
     }
 
     /** Move / resize, replace or delete a picture that is part of the PDF. */
@@ -1182,6 +1326,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     }
 
     private fun commitEdit() {
+        finishTyping(true)
         val w = editingWidget ?: return
         editingWidget = null
         val value = fieldEditor.text.toString()
@@ -1489,6 +1634,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     }
 
     private fun shareCurrent() {
+        commitEdit()
         if (dirty) {
             MaterialAlertDialogBuilder(this)
                 .setTitle("Share with your changes?")
@@ -1582,6 +1728,8 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         }
 
         findViewById<View>(R.id.betaDone).setOnClickListener { exitBeta() }
+        findViewById<View>(R.id.typeDone).setOnClickListener { finishTyping(true) }
+        findViewById<View>(R.id.typeCancel).setOnClickListener { finishTyping(false) }
         findViewById<View>(R.id.betaSave).setOnClickListener { if (requireEditable()) quickSave() }
         buildNormalTools()
     }
