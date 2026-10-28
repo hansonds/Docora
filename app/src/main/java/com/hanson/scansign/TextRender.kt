@@ -38,7 +38,7 @@ object TextRender {
         val p = paint(item, 1f)
         val ls = lines(item.text)
         val w = ls.maxOf { p.measureText(it) }.coerceAtLeast(item.sizePt * 0.6f)
-        val h = ls.size * LINE * item.sizePt
+        val h = ((ls.size - 1) * item.lineGap + LINE) * item.sizePt
         if (item.boxed) {
             val pad = 2 * PAD * item.sizePt
             return Pair(w + pad, h + pad)
@@ -66,7 +66,7 @@ object TextRender {
             t += PAD * size
         }
         lines(item.text).forEachIndexed { k, line ->
-            canvas.drawText(line, l, t + size * (ASCENT + LINE * k), p)
+            canvas.drawText(line, l, t + size * (ASCENT + item.lineGap * k), p)
         }
     }
 }

@@ -54,6 +54,8 @@ class PdfDocView @JvmOverloads constructor(
         fun onNeedPageText(page: Int) {}
         /** Text selection changed; null = cleared. [anchor] is the selection's screen bounds. */
         fun onTextSelected(text: String?, anchor: RectF?) {}
+        /** Edit PDF (beta): a tap on the page that didn't hit an item. Position in page fractions. */
+        fun onPagePick(page: Int, fx: Float, fy: Float) {}
     }
 
     /** A recognised word: text and position as page fractions; [lineEnd] = last word of a line. */
@@ -69,6 +71,43 @@ class PdfDocView @JvmOverloads constructor(
 
     fun hasPageWords(page: Int) = pageWords.containsKey(page)
     fun pageWords(page: Int): List<Word>? = pageWords[page]
+
+    // ---- Edit PDF (beta) ----
+    /** Taps that miss the user's items go to [Listener.onPagePick] (instead of form fields). */
+    var pickMode = false
+        set(v) { field = v; if (!v) { pickOutlines.clear(); pickFocus = null }; invalidate() }
+    private val pickOutlines = HashMap<Int, Pair<List<RectF>, List<RectF>>>()
+    /** The text / picture being edited right now. */
+    var pickFocus: Pair<Int, RectF>? = null
+        set(v) { field = v; invalidate() }
+    private val outlineText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; color = Color.argb(110, 36, 87, 245)
+        strokeWidth = 1f * context.resources.displayMetrics.density
+        pathEffect = android.graphics.DashPathEffect(floatArrayOf(5f * context.resources.displayMetrics.density, 4f * context.resources.displayMetrics.density), 0f)
+    }
+    private val outlineImage = Paint(outlineText).apply { color = Color.argb(150, 255, 120, 0) }
+    private val focusPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; color = Color.rgb(36, 87, 245); strokeWidth = 2.5f * context.resources.displayMetrics.density
+    }
+    private val focusFill = Paint().apply { color = Color.argb(30, 36, 87, 245) }
+
+    /** Shows what can be edited on [page]: text lines (blue dashes) and pictures (orange dashes). */
+    fun setPickOutlines(page: Int, text: List<RectF>, images: List<RectF>) {
+        pickOutlines[page] = Pair(text, images)
+        invalidate()
+    }
+
+    private fun drawPickOutlines(canvas: Canvas, page: Int, pr: RectF) {
+        if (!pickMode) return
+        fun s(r: RectF) = RectF(pr.left + r.left * pr.width(), pr.top + r.top * pr.height(), pr.left + r.right * pr.width(), pr.top + r.bottom * pr.height())
+        pickOutlines[page]?.let { (text, images) ->
+            for (r in images) canvas.drawRect(s(r), outlineImage)
+            for (r in text) canvas.drawRoundRect(s(r), 2 * density, 2 * density, outlineText)
+        }
+        pickFocus?.let { (p, r) ->
+            if (p == page) { val sr = s(r); sr.inset(-2 * density, -2 * density); canvas.drawRect(sr, focusFill); canvas.drawRect(sr, focusPaint) }
+        }
+    }
 
     // ---- find in document ----
     private var searchHits: Map<Int, List<SearchHit>> = emptyMap()
@@ -484,6 +523,9 @@ class PdfDocView @JvmOverloads constructor(
         return PointF(cx.coerceIn(0.1f, 0.9f), cy.coerceIn(0.1f, 0.9f))
     }
 
+    /** Width of [page] on screen right now, in pixels. */
+    fun pageScreenWidth(page: Int): Float = if (page in geoms.indices && pageTop.isNotEmpty()) pageScreenRect(page).width() else width.toFloat()
+
     fun pageSizePt(page: Int): PointF = geoms.getOrNull(page)?.let { PointF(it.dispW, it.dispH) } ?: PointF(595f, 842f)
 
     fun release() {
@@ -663,6 +705,7 @@ class PdfDocView @JvmOverloads constructor(
                 )
                 canvas.drawBitmap(t.bmp, null, dst, bmpPaint)
             }
+            drawPickOutlines(canvas, i, r)
             drawWidgets(canvas, i, r)
             drawItems(canvas, i, r)
             drawSearchHits(canvas, i, r)
@@ -1174,6 +1217,13 @@ class PdfDocView @JvmOverloads constructor(
         }
         if (selected != null) {
             select(null)
+            return
+        }
+        if (pickMode) {
+            for (i in visibleRange()) {
+                val pr = pageScreenRect(i)
+                if (pr.contains(x, y)) { listener?.onPagePick(i, (x - pr.left) / pr.width(), (y - pr.top) / pr.height()); return }
+            }
             return
         }
         // form fields

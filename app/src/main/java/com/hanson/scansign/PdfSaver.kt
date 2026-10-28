@@ -41,7 +41,10 @@ object PdfSaver {
                                 val img = images.getOrPut(item.file.absolutePath) { loadImage(doc, item.file) }
                                 cs.drawImage(img, boxMatrix(g, item.fx, item.fy, item.fw, item.fh, item.rotation))
                             }
-                            is TextItem -> drawText(doc, cs, g, item)
+                            is TextItem -> {
+                                if (item is ReplacedText) drawCover(cs, g, item.cover, item.coverColor)
+                                drawText(doc, cs, g, item)
+                            }
                             is InkItem -> drawInk(cs, g, item)
                             is ShapeItem -> drawShape(cs, g, item)
                         }
@@ -142,6 +145,17 @@ object PdfSaver {
         cs.restoreGraphicsState()
     }
 
+    /** Solid rectangle (page fractions) that hides the original text under replaced text. */
+    private fun drawCover(cs: PDPageContentStream, g: PageGeom, r: android.graphics.RectF, color: Int) {
+        val c = rgb(color)
+        cs.saveGraphicsState()
+        cs.setNonStrokingColor(c[0], c[1], c[2])
+        val a = up(g, r.left, r.top); val b = up(g, r.right, r.top); val cc = up(g, r.right, r.bottom); val d = up(g, r.left, r.bottom)
+        cs.moveTo(a.x, a.y); cs.lineTo(b.x, b.y); cs.lineTo(cc.x, cc.y); cs.lineTo(d.x, d.y); cs.closePath()
+        cs.fill()
+        cs.restoreGraphicsState()
+    }
+
     private fun circle(cs: PDPageContentStream, cx: Float, cy: Float, r: Float) {
         val k = 0.5523f * r
         cs.moveTo(cx + r, cy)
@@ -168,6 +182,7 @@ object PdfSaver {
         when (s.kind) {
             ShapeKind.RECT -> { quad(); cs.stroke() }
             ShapeKind.WHITEOUT -> { cs.setNonStrokingColor(1f, 1f, 1f); quad(); cs.fill() }
+            ShapeKind.FILL -> { quad(); cs.fill() }
             ShapeKind.HIGHLIGHT -> { cs.setGraphicsStateParameters(alphaState(0.35f)); quad(); cs.fill() }
             ShapeKind.ELLIPSE -> {
                 // bezier ellipse in page fractions, each point mapped (works on rotated pages)
@@ -284,7 +299,7 @@ object PdfSaver {
         }
         lines.forEachIndexed { k, line ->
             if (line.isEmpty()) return@forEachIndexed
-            val baseV = top + size * (TextRender.ASCENT + TextRender.LINE * k)
+            val baseV = top + size * (TextRender.ASCENT + item.lineGap * k)
             val o = T(left, baseV)
             val ux = T(left + 1f, baseV)
             val up = T(left, baseV - 1f)

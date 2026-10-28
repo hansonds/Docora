@@ -90,7 +90,7 @@ class SignatureItem(
     override fun copy() = SignatureItem(page, file, fx, fy, fw, fh, rotation)
 }
 
-class TextItem(
+open class TextItem(
     override val page: Int,
     var text: String,
     var color: Int,
@@ -102,9 +102,26 @@ class TextItem(
     /** Draw a rounded frame around the text (stamps). */
     var boxed: Boolean = false,
     /** Clockwise rotation in degrees, around the item's centre. */
-    var rotation: Float = 0f
+    var rotation: Float = 0f,
+    /** Distance between lines, as a multiple of the font size. */
+    var lineGap: Float = TextRender.LINE
 ) : EditItem() {
-    override fun copy() = TextItem(page, text, color, sizePt, bold, font, fx, fy, boxed, rotation)
+    override fun copy(): EditItem = TextItem(page, text, color, sizePt, bold, font, fx, fy, boxed, rotation, lineGap)
+}
+
+/**
+ * Edit PDF (beta): text that replaces original words. [cover] (page fractions) hides the old text
+ * with [coverColor]; the new text is drawn on top and can be moved / restyled like any text.
+ */
+class ReplacedText(
+    page: Int, text: String, color: Int, sizePt: Float, bold: Boolean, font: TextFont,
+    fx: Float, fy: Float, lineGap: Float,
+    val cover: RectF,
+    val coverColor: Int
+) : TextItem(page, text, color, sizePt, bold, font, fx, fy, false, 0f, lineGap) {
+    override fun copy(): EditItem = ReplacedText(page, text, color, sizePt, bold, font, fx, fy, lineGap, RectF(cover), coverColor).also {
+        it.rotation = rotation
+    }
 }
 
 /** One freehand pen / highlighter stroke. Points are page fractions. */
@@ -126,7 +143,9 @@ class InkItem(
 }
 
 enum class ShapeKind(val label: String) {
-    RECT("Box"), ELLIPSE("Circle"), LINE("Line"), ARROW("Arrow"), WHITEOUT("Whiteout"), HIGHLIGHT("Highlight box")
+    RECT("Box"), ELLIPSE("Circle"), LINE("Line"), ARROW("Arrow"), WHITEOUT("Whiteout"), HIGHLIGHT("Highlight box"),
+    /** Solid box in [ShapeItem.color]: hides deleted text / pictures, or blacks out (redaction). */
+    FILL("Cover")
 }
 
 /**
