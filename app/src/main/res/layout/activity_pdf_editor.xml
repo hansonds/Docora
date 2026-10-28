@@ -38,6 +38,19 @@
             android:textColor="#0A143C"
             android:visibility="gone" />
 
+        <!-- Edit PDF (beta): type straight onto the page -->
+        <EditText
+            android:id="@+id/typeBox"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_type_box"
+            android:gravity="top|start"
+            android:importantForAutofill="no"
+            android:includeFontPadding="false"
+            android:inputType="textMultiLine|textCapSentences"
+            android:padding="0dp"
+            android:visibility="gone" />
+
         <LinearLayout
             android:id="@+id/textBar"
             android:layout_width="wrap_content"
@@ -484,6 +497,7 @@
             </LinearLayout>
 
             <HorizontalScrollView
+                android:id="@+id/toolsScroll"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:scrollbars="none">
@@ -497,5 +511,50 @@
                     android:paddingHorizontal="6dp"
                     android:paddingVertical="2dp" />
             </HorizontalScrollView>
+
+            <!-- Edit PDF (beta): style controls while typing on the page -->
+            <LinearLayout
+                android:id="@+id/typeBar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="6dp"
+                android:paddingVertical="4dp"
+                android:visibility="gone">
+
+                <HorizontalScrollView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:scrollbars="none">
+
+                    <LinearLayout
+                        android:id="@+id/typeTools"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal" />
+                </HorizontalScrollView>
+
+                <ImageButton
+                    android:id="@+id/typeCancel"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="Cancel"
+                    android:src="@drawable/ic_close"
+                    app:tint="?attr/colorOnSurface" />
+
+                <ImageButton
+                    android:id="@+id/typeDone"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:layout_marginStart="2dp"
+                    android:background="@drawable/bg_done_fab"
+                    android:contentDescription="Done"
+                    android:src="@drawable/ic_check"
+                    app:tint="#FFFFFF" />
+            </LinearLayout>
     </LinearLayout>
 </FrameLayout>

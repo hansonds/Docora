@@ -305,9 +305,11 @@ object PdfSaver {
             val up = T(left, baseV - 1f)
             cs.beginText()
             cs.setFont(font, size)
+            if (item.scaleX != 1f) cs.setHorizontalScaling(item.scaleX * 100f)
             cs.setNonStrokingColor(r, gr, b)
             cs.setTextMatrix(Matrix(ux.x - o.x, ux.y - o.y, up.x - o.x, up.y - o.y, o.x, o.y))
             cs.showText(line)
+            if (item.scaleX != 1f) cs.setHorizontalScaling(100f)
             cs.endText()
         }
     }

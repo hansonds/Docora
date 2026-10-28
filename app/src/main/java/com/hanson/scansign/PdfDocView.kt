@@ -845,13 +845,35 @@ class PdfDocView @JvmOverloads constructor(
             pr.left + f.right * pr.width(), pr.top + f.bottom * pr.height())
     }
 
+    /** Replaced text being typed over on the page: only its cover is drawn (the typing box shows the words). */
+    var typingItem: ReplacedText? = null
+        set(v) { field = v; invalidate() }
+    private val coverPaint = Paint()
+
     private fun drawItems(canvas: Canvas, page: Int, pr: RectF) {
         val s = pxPerPt(page)
         for (item in items) {
             if (item.page != page) continue
+            if (item === typingItem) {
+                val c = (item as ReplacedText).cover
+                coverPaint.color = item.coverColor
+                canvas.drawRect(pr.left + c.left * pr.width(), pr.top + c.top * pr.height(),
+                    pr.left + c.right * pr.width(), pr.top + c.bottom * pr.height(), coverPaint)
+                continue
+            }
             ItemRender.draw(canvas, item, pr, s, { sigBitmap(it) }, item === selected)
         }
     }
+
+    /** A page-fraction rectangle on screen right now. */
+    fun fracToScreen(page: Int, r: RectF): RectF? {
+        if (page !in geoms.indices || pageTop.isEmpty()) return null
+        val pr = pageScreenRect(page)
+        return RectF(pr.left + r.left * pr.width(), pr.top + r.top * pr.height(), pr.left + r.right * pr.width(), pr.top + r.bottom * pr.height())
+    }
+
+    /** Screen pixels per PDF point on [page] at the current zoom. */
+    fun pxPerPtOn(page: Int): Float = if (page in geoms.indices && pageTop.isNotEmpty()) pxPerPt(page) else 1f
 
     /** Precise hit test: thin items (pen strokes, lines) only respond near the stroke. */
     private fun hits(item: EditItem, xIn: Float, yIn: Float, extra: Float = 0f): Boolean {

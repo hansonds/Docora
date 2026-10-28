@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- transparent typing box with an accent outline -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#00000000" />
+    <stroke android:width="1.5dp" android:color="?attr/colorPrimary" android:dashWidth="5dp" android:dashGap="3dp" />
+</shape>

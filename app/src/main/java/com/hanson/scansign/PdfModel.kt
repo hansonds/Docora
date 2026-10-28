@@ -104,9 +104,11 @@ open class TextItem(
     /** Clockwise rotation in degrees, around the item's centre. */
     var rotation: Float = 0f,
     /** Distance between lines, as a multiple of the font size. */
-    var lineGap: Float = TextRender.LINE
+    var lineGap: Float = TextRender.LINE,
+    /** Letter width (1 = normal); lets a stand-in font match the original's spacing. */
+    var scaleX: Float = 1f
 ) : EditItem() {
-    override fun copy(): EditItem = TextItem(page, text, color, sizePt, bold, font, fx, fy, boxed, rotation, lineGap)
+    override fun copy(): EditItem = TextItem(page, text, color, sizePt, bold, font, fx, fy, boxed, rotation, lineGap, scaleX)
 }
 
 /**
@@ -117,9 +119,14 @@ class ReplacedText(
     page: Int, text: String, color: Int, sizePt: Float, bold: Boolean, font: TextFont,
     fx: Float, fy: Float, lineGap: Float,
     val cover: RectF,
-    val coverColor: Int
-) : TextItem(page, text, color, sizePt, bold, font, fx, fy, false, 0f, lineGap) {
-    override fun copy(): EditItem = ReplacedText(page, text, color, sizePt, bold, font, fx, fy, lineGap, RectF(cover), coverColor).also {
+    val coverColor: Int,
+    scaleX: Float = 1f,
+    /** Width (points) the text wraps at, so it stays inside the original column. */
+    var wrapPt: Float = 0f,
+    /** The words as typed (before wrapping into lines). */
+    var plain: String = text
+) : TextItem(page, text, color, sizePt, bold, font, fx, fy, false, 0f, lineGap, scaleX) {
+    override fun copy(): EditItem = ReplacedText(page, text, color, sizePt, bold, font, fx, fy, lineGap, RectF(cover), coverColor, scaleX, wrapPt, plain).also {
         it.rotation = rotation
     }
 }
