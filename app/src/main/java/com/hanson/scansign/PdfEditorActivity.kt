@@ -1930,6 +1930,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     }
 
     private fun confirmLeave() {
+        if (typing != null) { finishTyping(true); return }
         if (editingWidget != null) { commitEdit(); return }
         if (!dirty) { finish(); return }
         MaterialAlertDialogBuilder(this)
