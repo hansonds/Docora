@@ -95,16 +95,16 @@ class CropActivity : BaseActivity() {
         cropView.visibility = if (isSig) View.GONE else View.VISIBLE
         ratioView.visibility = if (isSig) View.VISIBLE else View.GONE
         findViewById<View>(R.id.btnAuto).visibility = if (isSig) View.GONE else View.VISIBLE
-        findViewById<MaterialButton>(R.id.btnFull).text = if (isSig) "Reset" else "Full image"
+        findViewById<TileButton>(R.id.btnFull).text = if (isSig) "Reset" else "Full image"
         showFilterStep(false)
         setupFilters()
 
-        findViewById<MaterialButton>(R.id.btnAuto).setOnClickListener { autoDetect() }
-        findViewById<MaterialButton>(R.id.btnFull).setOnClickListener {
+        findViewById<View>(R.id.btnAuto).setOnClickListener { autoDetect() }
+        findViewById<View>(R.id.btnFull).setOnClickListener {
             val b = source ?: return@setOnClickListener
             if (isSig) ratioView.resetCrop() else cropView.setQuad(Scanner.fullQuad(b.width, b.height))
         }
-        findViewById<MaterialButton>(R.id.btnRotate).setOnClickListener { rotate() }
+        findViewById<View>(R.id.btnRotate).setOnClickListener { rotate() }
         btnBack.setOnClickListener { goBack() }
         btnNext.setOnClickListener { next() }
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {

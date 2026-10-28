@@ -65,29 +65,26 @@
             android:paddingHorizontal="8dp"
             android:paddingVertical="6dp">
 
-            <com.google.android.material.button.MaterialButton
+            <com.hanson.scansign.TileButton
                 android:id="@+id/btnCamera"
-                style="@style/Widget.App.ToolButton"
                 android:layout_width="0dp"
-                android:layout_height="64dp"
+                android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="Camera"
                 app:icon="@drawable/ic_camera" />
 
-            <com.google.android.material.button.MaterialButton
+            <com.hanson.scansign.TileButton
                 android:id="@+id/btnGallery"
-                style="@style/Widget.App.ToolButton"
                 android:layout_width="0dp"
-                android:layout_height="64dp"
+                android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="Gallery"
                 app:icon="@drawable/ic_photo" />
 
-            <com.google.android.material.button.MaterialButton
+            <com.hanson.scansign.TileButton
                 android:id="@+id/btnDraw"
-                style="@style/Widget.App.ToolButton"
                 android:layout_width="0dp"
-                android:layout_height="64dp"
+                android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="Draw"
                 app:icon="@drawable/ic_draw" />

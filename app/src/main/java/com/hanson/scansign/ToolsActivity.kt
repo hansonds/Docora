@@ -89,11 +89,7 @@ class ToolsActivity : BaseActivity() {
                     val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
                     if (i > 0) lp.marginStart = gap
                     tile.layoutParams = lp
-                    tile.findViewById<View>(R.id.iconBox).backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(this, t.bg))
-                    tile.findViewById<ImageView>(R.id.icon).apply {
-                        setImageResource(t.icon)
-                        imageTintList = ColorStateList.valueOf(ContextCompat.getColor(this@ToolsActivity, t.fg))
-                    }
+                    IconTiles.feature(tile.findViewById(R.id.iconBox), tile.findViewById(R.id.icon), t.icon, hueOf(t))
                     tile.findViewById<TextView>(R.id.title).text = t.title
                     tile.findViewById<TextView>(R.id.subtitle).text = t.sub
                     tile.setOnClickListener { start(t) }
@@ -101,6 +97,24 @@ class ToolsActivity : BaseActivity() {
                 }
             }
         }
+    }
+
+    /** Each tool gets its own colour so the grid is easy to scan. */
+    private fun hueOf(t: Tool) = when (t) {
+        Tool.SIGN -> IconTiles.Hue.VIOLET
+        Tool.ORGANIZE -> IconTiles.Hue.BLUE
+        Tool.MERGE -> IconTiles.Hue.TEAL
+        Tool.SPLIT -> IconTiles.Hue.ORANGE
+        Tool.EXTRACT -> IconTiles.Hue.INDIGO
+        Tool.COMPRESS -> IconTiles.Hue.GREEN
+        Tool.TO_JPG -> IconTiles.Hue.PINK
+        Tool.IMAGES -> IconTiles.Hue.AMBER
+        Tool.OCR_TEXT -> IconTiles.Hue.CYAN
+        Tool.SEARCHABLE -> IconTiles.Hue.BLUE
+        Tool.PROTECT -> IconTiles.Hue.RED
+        Tool.UNLOCK -> IconTiles.Hue.SLATE
+        Tool.WATERMARK -> IconTiles.Hue.VIOLET
+        Tool.NUMBERS -> IconTiles.Hue.TEAL
     }
 
     private fun start(t: Tool) {

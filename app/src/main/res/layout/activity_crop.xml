@@ -81,44 +81,32 @@
         android:orientation="horizontal"
         android:paddingHorizontal="8dp">
 
-        <com.google.android.material.button.MaterialButton
+        <com.hanson.scansign.TileButton
             android:id="@+id/btnAuto"
-            style="@style/Widget.App.ToolButton"
-            android:layout_height="64dp"
+            android:layout_height="wrap_content"
             android:layout_width="0dp"
             android:layout_weight="1"
+            android:tag="dark"
             android:text="Auto detect"
-            android:textColor="#FFFFFF"
-            android:textSize="12sp"
-            app:icon="@drawable/ic_auto"
-            app:iconGravity="top"
-            app:iconTint="#FFFFFF" />
+            app:icon="@drawable/ic_auto" />
 
-        <com.google.android.material.button.MaterialButton
+        <com.hanson.scansign.TileButton
             android:id="@+id/btnFull"
-            style="@style/Widget.App.ToolButton"
-            android:layout_height="64dp"
+            android:layout_height="wrap_content"
             android:layout_width="0dp"
             android:layout_weight="1"
+            android:tag="dark"
             android:text="Full image"
-            android:textColor="#FFFFFF"
-            android:textSize="12sp"
-            app:icon="@drawable/ic_crop"
-            app:iconGravity="top"
-            app:iconTint="#FFFFFF" />
+            app:icon="@drawable/ic_crop" />
 
-        <com.google.android.material.button.MaterialButton
+        <com.hanson.scansign.TileButton
             android:id="@+id/btnRotate"
-            style="@style/Widget.App.ToolButton"
-            android:layout_height="64dp"
+            android:layout_height="wrap_content"
             android:layout_width="0dp"
             android:layout_weight="1"
+            android:tag="dark"
             android:text="Rotate"
-            android:textColor="#FFFFFF"
-            android:textSize="12sp"
-            app:icon="@drawable/ic_rotate"
-            app:iconGravity="top"
-            app:iconTint="#FFFFFF" />
+            app:icon="@drawable/ic_rotate" />
     </LinearLayout>
 
     <LinearLayout

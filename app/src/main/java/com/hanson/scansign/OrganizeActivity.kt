@@ -110,9 +110,9 @@ class OrganizeActivity : BaseActivity() {
     }
 
     private fun action(parent: LinearLayout, label: String, icon: Int, onClick: () -> Unit) {
-        val b = LayoutInflater.from(this).inflate(R.layout.view_tool_button, parent, false) as MaterialButton
+        val b = TileButton(this)
         b.text = label
-        b.setIconResource(icon)
+        b.setIcon(icon)
         b.setOnClickListener { onClick() }
         parent.addView(b)
     }

@@ -89,16 +89,16 @@ class MainActivity : BaseActivity() {
         findViewById<MaterialButton>(R.id.btnScan).setOnClickListener {
             startActivity(ScanActivity.intent(this, ScanActivity.START_CAMERA))
         }
-        tile(R.id.tileOpen, R.drawable.ic_folder, R.color.icon_tile_1, R.color.brand, "Open PDF", "View, edit, sign, fill") {
+        tile(R.id.tileOpen, R.drawable.ic_folder, IconTiles.Hue.BLUE, "Open PDF", "View, edit, sign, fill") {
             openPdf.launch(arrayOf("application/pdf"))
         }
-        tile(R.id.tileImport, R.drawable.ic_photo, R.color.icon_tile_2, R.color.md_secondary, "From photos", "Turn images into PDF") {
+        tile(R.id.tileImport, R.drawable.ic_photo, IconTiles.Hue.TEAL, "From photos", "Turn images into PDF") {
             startActivity(ScanActivity.intent(this, ScanActivity.START_GALLERY))
         }
-        tile(R.id.tileForm, R.drawable.ic_tools, R.color.icon_tile_3, R.color.danger, "PDF Tools", "Merge, split, compress, OCR…") {
+        tile(R.id.tileForm, R.drawable.ic_tools, IconTiles.Hue.ORANGE, "PDF Tools", "Merge, split, compress, OCR…") {
             startActivity(Intent(this, ToolsActivity::class.java))
         }
-        tile(R.id.tileSigs, R.drawable.ic_sign, R.color.icon_tile_4, R.color.brand_purple, "Signatures", "Create & manage") {
+        tile(R.id.tileSigs, R.drawable.ic_sign, IconTiles.Hue.VIOLET, "Signatures", "Create & manage") {
             startActivity(SignaturesActivity.intent(this, pick = false))
         }
         btnResume.setOnClickListener { startActivity(ScanActivity.intent(this, null)) }
@@ -119,13 +119,9 @@ class MainActivity : BaseActivity() {
         if (savedInstanceState == null) handleIncoming(intent)
     }
 
-    private fun tile(id: Int, icon: Int, bg: Int, fg: Int, title: String, sub: String, onClick: () -> Unit) {
+    private fun tile(id: Int, icon: Int, hue: IconTiles.Hue, title: String, sub: String, onClick: () -> Unit) {
         val t = findViewById<View>(id)
-        t.findViewById<View>(R.id.iconBox).backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(this, bg))
-        t.findViewById<ImageView>(R.id.icon).apply {
-            setImageResource(icon)
-            imageTintList = ColorStateList.valueOf(ContextCompat.getColor(this@MainActivity, fg))
-        }
+        IconTiles.feature(t.findViewById(R.id.iconBox), t.findViewById(R.id.icon), icon, hue)
         t.findViewById<TextView>(R.id.title).text = title
         t.findViewById<TextView>(R.id.subtitle).text = sub
         t.setOnClickListener { onClick() }

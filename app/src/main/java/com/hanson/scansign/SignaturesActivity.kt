@@ -93,13 +93,13 @@ class SignaturesActivity : BaseActivity() {
         list.layoutManager = GridLayoutManager(this, Ui.columns(this, 190, 2))
         list.adapter = adapter
 
-        findViewById<MaterialButton>(R.id.btnCamera).setOnClickListener {
+        findViewById<View>(R.id.btnCamera).setOnClickListener {
             cameraLauncher.launch(CameraActivity.intent(this, CameraActivity.MODE_SIG))
         }
-        findViewById<MaterialButton>(R.id.btnDraw).setOnClickListener {
+        findViewById<View>(R.id.btnDraw).setOnClickListener {
             drawLauncher.launch(Intent(this, DrawSignatureActivity::class.java))
         }
-        findViewById<MaterialButton>(R.id.btnGallery).setOnClickListener {
+        findViewById<View>(R.id.btnGallery).setOnClickListener {
             pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
         }
         reload()
