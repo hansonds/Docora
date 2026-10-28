@@ -41,7 +41,11 @@ class MainActivity : BaseActivity() {
     private lateinit var empty: TextView
     private lateinit var count: TextView
     private lateinit var btnResume: MaterialButton
-    private var files: List<File> = emptyList()
+    /** One line in the recent list: a file, plus its "Recently opened" entry when on that tab. */
+    private class Row(val file: File, val title: String, val time: Long, val entry: Recents.Entry?)
+    private var rows: List<Row> = emptyList()
+    private enum class Tab { OPENED, EDITED }
+    private var tab = Tab.OPENED
     private val adapter = PdfAdapter()
     private val thumbCache = HashMap<String, Bitmap>()
 
@@ -102,6 +106,16 @@ class MainActivity : BaseActivity() {
             startActivity(SignaturesActivity.intent(this, pick = false))
         }
         btnResume.setOnClickListener { startActivity(ScanActivity.intent(this, null)) }
+        tab = runCatching { Tab.valueOf(getSharedPreferences("lib", MODE_PRIVATE).getString("tab", Tab.OPENED.name)!!) }.getOrDefault(Tab.OPENED)
+        findViewById<com.google.android.material.button.MaterialButtonToggleGroup>(R.id.recentTabs).apply {
+            check(if (tab == Tab.OPENED) R.id.tabOpened else R.id.tabEdited)
+            addOnButtonCheckedListener { _, id, checked ->
+                if (!checked) return@addOnButtonCheckedListener
+                tab = if (id == R.id.tabOpened) Tab.OPENED else Tab.EDITED
+                getSharedPreferences("lib", MODE_PRIVATE).edit().putString("tab", tab.name).apply()
+                reload()
+            }
+        }
         sortBtn = findViewById(R.id.btnSortList)
         sortBtn.setOnClickListener { chooseSort() }
         sort = runCatching { Sort.valueOf(getSharedPreferences("lib", MODE_PRIVATE).getString("sort", Sort.NEWEST.name)!!) }.getOrDefault(Sort.NEWEST)
@@ -201,22 +215,62 @@ class MainActivity : BaseActivity() {
     }
 
     private fun reload() {
-        val all = Storage.listPdfs(this)
+        val all = when (tab) {
+            Tab.OPENED -> Recents.list(this).map { Row(it.file, it.name.removeSuffix(".pdf").removeSuffix(".PDF"), it.time, it) }
+            Tab.EDITED -> Storage.listPdfs(this).map { Row(it, it.name.removeSuffix(".pdf"), it.lastModified(), null) }
+        }
         val q = query.trim()
-        val filtered = if (q.isEmpty()) all else all.filter { it.name.contains(q, ignoreCase = true) }
-        files = when (sort) {
-            Sort.NEWEST -> filtered.sortedByDescending { it.lastModified() }
-            Sort.OLDEST -> filtered.sortedBy { it.lastModified() }
-            Sort.NAME -> filtered.sortedBy { it.name.lowercase() }
-            Sort.SIZE -> filtered.sortedByDescending { it.length() }
+        val filtered = if (q.isEmpty()) all else all.filter { it.title.contains(q, ignoreCase = true) }
+        rows = when (sort) {
+            Sort.NEWEST -> filtered.sortedByDescending { it.time }
+            Sort.OLDEST -> filtered.sortedBy { it.time }
+            Sort.NAME -> filtered.sortedBy { it.title.lowercase() }
+            Sort.SIZE -> filtered.sortedByDescending { it.file.length() }
         }
         adapter.notifyDataSetChanged()
-        empty.visibility = if (files.isEmpty()) View.VISIBLE else View.GONE
-        empty.text = if (query.isNotBlank()) "No files match \"$query\"." else "No files yet.\nScanned and signed PDFs appear here."
-        count.text = if (files.isEmpty()) "" else "${files.size}"
+        empty.visibility = if (rows.isEmpty()) View.VISIBLE else View.GONE
+        empty.text = when {
+            query.isNotBlank() -> "No files match \"$query\"."
+            tab == Tab.OPENED -> "Nothing opened yet.\nPDFs you view — from here, WhatsApp, Gmail or Files — appear here."
+            else -> "Nothing edited yet.\nPDFs you scan, sign, edit and save appear here."
+        }
+        count.text = if (rows.isEmpty()) "" else "${rows.size}"
         val n = ScanSession.pages.size
         btnResume.visibility = if (n > 0) View.VISIBLE else View.GONE
         btnResume.text = "Continue unfinished scan ($n page${if (n == 1) "" else "s"})"
+    }
+
+    /** Reopens a "Recently opened" PDF (with its original link when Docora still has access to it). */
+    private fun openRecent(e: Recents.Entry) {
+        val uri = e.uri?.let { Uri.parse(it) }?.takeIf { u ->
+            contentResolver.persistedUriPermissions.any { it.uri == u && it.isReadPermission }
+        }
+        startActivity(PdfEditorActivity.intent(this, e.file, e.name, uri))
+    }
+
+    private fun recentOptions(anchor: View, e: Recents.Entry) {
+        val menu = PopupMenu(this, anchor)
+        menu.menu.add(0, 1, 0, "Open")
+        menu.menu.add(0, 2, 1, "Share")
+        menu.menu.add(0, 3, 2, "Print")
+        menu.menu.add(0, 4, 3, "Remove from this list")
+        menu.menu.add(0, 5, 4, "Clear all recently opened")
+        menu.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                1 -> openRecent(e)
+                2 -> Ui.share(this, e.file)
+                3 -> Ui.print(this, e.file, e.name)
+                4 -> { Recents.remove(this, e.key); reload() }
+                5 -> MaterialAlertDialogBuilder(this)
+                    .setTitle("Clear recently opened?")
+                    .setMessage("Only this list is cleared. Your saved and edited PDFs are not affected.")
+                    .setPositiveButton("Clear") { _, _ -> Recents.clear(this); reload() }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            }
+            true
+        }
+        menu.show()
     }
 
     private fun options(anchor: View, f: File) {
@@ -318,21 +372,27 @@ class MainActivity : BaseActivity() {
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) =
             VH(LayoutInflater.from(parent.context).inflate(R.layout.item_pdf, parent, false))
 
-        override fun getItemCount() = files.size
+        override fun getItemCount() = rows.size
 
-        private fun meta(f: File): String {
+        private fun meta(row: Row): String {
+            val f = row.file
             val pages = pageCounts[f.absolutePath]
-            return DateFormat.format("dd MMM yyyy, hh:mm a", f.lastModified()).toString() +
+            val from = row.entry?.source?.let { "  ·  $it" } ?: ""
+            return DateFormat.format("dd MMM yyyy, hh:mm a", row.time).toString() + from +
                 "  ·  " + Formatter.formatShortFileSize(this@MainActivity, f.length()) +
                 (if (pages != null && pages > 0) "  ·  $pages pg" else "")
         }
 
         override fun onBindViewHolder(holder: VH, position: Int) {
-            val f = files[position]
-            holder.name.text = f.name.removeSuffix(".pdf")
-            holder.meta.text = meta(f)
-            holder.itemView.setOnClickListener { startActivity(PdfEditorActivity.intent(this@MainActivity, f)) }
-            holder.more.setOnClickListener { options(it, f) }
+            val row = rows[position]
+            val f = row.file
+            val e = row.entry
+            holder.name.text = row.title
+            holder.meta.text = meta(row)
+            holder.itemView.setOnClickListener {
+                if (e != null) openRecent(e) else startActivity(PdfEditorActivity.intent(this@MainActivity, f))
+            }
+            holder.more.setOnClickListener { if (e != null) recentOptions(it, e) else options(it, f) }
             val key = f.absolutePath
             holder.thumb.tag = key
             val cached = thumbCache[key]
@@ -346,7 +406,7 @@ class MainActivity : BaseActivity() {
                     if (bmp != null) thumbCache[key] = bmp
                     if (holder.thumb.tag == key) {
                         holder.thumb.setImageBitmap(bmp)
-                        holder.meta.text = meta(f)
+                        holder.meta.text = meta(row)
                     }
                 }
             }

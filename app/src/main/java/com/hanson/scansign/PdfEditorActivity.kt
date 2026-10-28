@@ -78,6 +78,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     private var fullscreen = false
     /** Full screen is applied automatically only when the file is first opened. */
     private var autoFullscreenDone = false
+    private var recordedOpen = false
     private val hideExit = Runnable { fade(btnExitFull, false) }
     private val hidePill = Runnable { if (fullscreen) fade(pagePill, false) }
     private lateinit var fieldEditor: EditText
@@ -299,6 +300,14 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             Toast.makeText(this, "This PDF can be viewed, but it can't be edited", Toast.LENGTH_LONG).show()
         }
         // open straight into full-screen reading (forms stay in normal mode so they're easy to fill)
+        if (!recordedOpen) {
+            // remember it under "Recently opened" on the home screen
+            recordedOpen = true
+            val src = source; val name = displayName; val uri = sourceUri; val lib = inLibrary()
+            lifecycleScope.launch(Dispatchers.IO) {
+                try { Recents.record(applicationContext, src, name, uri, lib) } catch (_: Throwable) {}
+            }
+        }
         if (!autoFullscreenDone) {
             autoFullscreenDone = true
             if (Settings.openFullscreen(this) && p.fields.isEmpty()) setFullscreen(true)
