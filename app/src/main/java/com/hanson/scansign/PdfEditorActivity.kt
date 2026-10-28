@@ -74,6 +74,8 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     private lateinit var editorRoot: View
     private lateinit var btnExitFull: View
     private var fullscreen = false
+    /** Full screen is applied automatically only when the file is first opened. */
+    private var autoFullscreenDone = false
     private val hideExit = Runnable { fade(btnExitFull, false) }
     private val hidePill = Runnable { if (fullscreen) fade(pagePill, false) }
     private lateinit var fieldEditor: EditText
@@ -266,6 +268,11 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         if (!p.editable) {
             Toast.makeText(this, "This PDF can be viewed, but it can't be edited", Toast.LENGTH_LONG).show()
         }
+        // open straight into full-screen reading (forms stay in normal mode so they're easy to fill)
+        if (!autoFullscreenDone) {
+            autoFullscreenDone = true
+            if (Settings.openFullscreen(this) && p.fields.isEmpty()) setFullscreen(true)
+        }
     }
 
     private fun requireEditable(): Boolean {
@@ -442,7 +449,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         fade(pagePill, !on && ready)
         if (on) {
             flashExit()
-            hintOnce("fs_hint", "Tap the page to show the exit button")
+            hintOnce("fs_hint2", "Full screen — tap the page, then ⛶ to show the editing tools")
         } else {
             btnExitFull.removeCallbacks(hideExit)
             btnExitFull.animate().cancel()

@@ -56,19 +56,17 @@
             android:paddingHorizontal="10dp"
             android:paddingVertical="8dp">
 
-            <com.google.android.material.button.MaterialButton
+            <com.hanson.scansign.TileButton
                 android:id="@+id/btnCamera"
-                style="@style/Widget.App.ToolButton"
-                android:layout_height="64dp"
+                android:layout_height="wrap_content"
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:text="Camera"
                 app:icon="@drawable/ic_camera" />
 
-            <com.google.android.material.button.MaterialButton
+            <com.hanson.scansign.TileButton
                 android:id="@+id/btnPhotos"
-                style="@style/Widget.App.ToolButton"
-                android:layout_height="64dp"
+                android:layout_height="wrap_content"
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:text="Photos"

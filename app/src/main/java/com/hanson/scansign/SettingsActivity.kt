@@ -1,6 +1,7 @@
 package com.hanson.scansign
 
 import android.os.Bundle
+import android.widget.TextView
 import android.widget.RadioGroup
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.appbar.MaterialToolbar
@@ -70,6 +71,17 @@ class SettingsActivity : BaseActivity() {
         val amoled = findViewById<MaterialSwitch>(R.id.amoled)
         amoled.isChecked = Themes.amoled(this)
         amoled.setOnCheckedChangeListener { _, on -> Themes.setAmoled(this, on); recreate() }
+
+        val fullscreen = findViewById<MaterialSwitch>(R.id.openFullscreen)
+        fullscreen.isChecked = Settings.openFullscreen(this)
+        fullscreen.setOnCheckedChangeListener { _, on -> prefs.edit().putBoolean(Settings.OPEN_FULLSCREEN, on).apply() }
+
+        for ((id, icon, hue) in listOf(
+            Triple(R.id.secAppearance, R.drawable.ic_night, IconTiles.Hue.VIOLET),
+            Triple(R.id.secViewer, R.drawable.ic_pdf, IconTiles.Hue.BLUE),
+            Triple(R.id.secScanner, R.drawable.ic_camera, IconTiles.Hue.TEAL),
+            Triple(R.id.secOcr, R.drawable.ic_ocr, IconTiles.Hue.ORANGE)
+        )) findViewById<TextView>(id).setCompoundDrawablesRelativeWithIntrinsicBounds(IconTiles.badge(this, icon, hue), null, null, null)
 
         val searchable = findViewById<MaterialSwitch>(R.id.searchable)
         searchable.isChecked = Settings.searchableDefault(this)

@@ -102,10 +102,8 @@ object ShareSheet {
             row.findViewById<TextView>(R.id.title).text = o.title
             row.findViewById<TextView>(R.id.subtitle).text = o.sub
             row.findViewById<View>(R.id.badge).visibility = if (o.recommended) View.VISIBLE else View.GONE
-            row.findViewById<View>(R.id.iconBox).backgroundTintList = ColorStateList.valueOf(outline.selected)
+            IconTiles.accentFeature(row.findViewById(R.id.iconBox), row.findViewById(R.id.icon), o.icon)
             row.findViewById<ImageView>(R.id.icon).apply {
-                setImageResource(o.icon)
-                imageTintList = ColorStateList.valueOf(primary)
                 val sc = when (o.level) { CompressLevel.MEDIUM -> 0.88f; CompressLevel.STRONG -> 0.76f; else -> 1f }
                 scaleX = sc; scaleY = sc
             }

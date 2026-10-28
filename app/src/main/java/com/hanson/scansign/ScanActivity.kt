@@ -126,8 +126,8 @@ class ScanActivity : BaseActivity() {
         list.layoutManager = GridLayoutManager(this, Ui.columns(this, 170, 2))
         list.adapter = adapter
 
-        findViewById<MaterialButton>(R.id.btnCamera).setOnClickListener { openCamera() }
-        findViewById<MaterialButton>(R.id.btnPhotos).setOnClickListener { openGallery() }
+        findViewById<View>(R.id.btnCamera).setOnClickListener { openCamera() }
+        findViewById<View>(R.id.btnPhotos).setOnClickListener { openGallery() }
         findViewById<MaterialButton>(R.id.btnSave).setOnClickListener { askSave() }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {

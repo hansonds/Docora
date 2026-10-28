@@ -37,8 +37,11 @@
                     android:padding="16dp">
 
                     <TextView
+                        android:id="@+id/secAppearance"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
+                        android:drawablePadding="12dp"
+                        android:gravity="center_vertical"
                         android:text="Appearance"
                         android:textAppearance="@style/TextAppearance.App.Section" />
 
@@ -103,6 +106,43 @@
 
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:id="@+id/secViewer"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:drawablePadding="12dp"
+                        android:gravity="center_vertical"
+                        android:text="PDF viewer"
+                        android:textAppearance="@style/TextAppearance.App.Section" />
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/openFullscreen"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:text="Open PDFs in full screen" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="Only the document is shown. Tap the page, then the exit button, to get the editing tools."
+                        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                        android:textColor="?attr/colorOnSurfaceVariant" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content">
 
                 <LinearLayout
@@ -112,8 +152,11 @@
                     android:padding="16dp">
 
                     <TextView
+                        android:id="@+id/secScanner"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
+                        android:drawablePadding="12dp"
+                        android:gravity="center_vertical"
                         android:text="Scanner"
                         android:textAppearance="@style/TextAppearance.App.Section" />
 
@@ -174,8 +217,11 @@
                     android:padding="16dp">
 
                     <TextView
+                        android:id="@+id/secOcr"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
+                        android:drawablePadding="12dp"
+                        android:gravity="center_vertical"
                         android:text="Text recognition (OCR)"
                         android:textAppearance="@style/TextAppearance.App.Section" />
 
