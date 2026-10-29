@@ -84,7 +84,8 @@ object Recents {
             return
         }
         val old = list.firstOrNull { it.key == key }
-        val path = if (inLibrary) file.absolutePath else {
+        // very large files (books) aren't copied again: the opened copy is remembered instead
+        val path = if (inLibrary || file.length() > 60L * 1024 * 1024) file.absolutePath else {
             // keep our own copy (replacing an older copy of the same document)
             val target = old?.takeIf { isCopy(ctx, it) }?.file ?: File(dir(ctx), "r_${System.currentTimeMillis()}.pdf")
             try {

@@ -238,10 +238,23 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
 
     // ---------------- opening ----------------
 
+    /** A long document is on screen while its editing / form data is still being read. */
+    private var preparing = false
+
     private fun open(password: String?) {
         setLoading(true, "Opening…")
         lifecycleScope.launch {
+            // long documents: show the pages straight away, read the rest in the background
+            val quick = if (password == null) withContext(Dispatchers.IO) { PdfOpener.quickOpen(source) } else null
+            if (quick != null) { preparing = true; show(quick) }
             val result = withContext(Dispatchers.IO) { PdfOpener.open(this@PdfEditorActivity, source, password) }
+            if (quick != null) {
+                preparing = false
+                if (pdf !== quick) return@launch
+                if (result is OpenResult.Ok) upgrade(result.pdf)
+                else toolbar.subtitle = "${quick.geoms.size} pages · view only"
+                return@launch
+            }
             when (result) {
                 is OpenResult.Ok -> show(result.pdf)
                 OpenResult.NeedPassword -> askPassword(false)
@@ -300,7 +313,8 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         doc.drawAllValues = !p.valuesBaked && p.fields.isNotEmpty()
         setLoading(false, null)
         toolbar.subtitle = "${p.geoms.size} page${if (p.geoms.size == 1) "" else "s"}" +
-            if (p.fields.isNotEmpty()) " · ${p.fields.size} form fields" else ""
+            (if (p.fields.isNotEmpty()) " · ${p.fields.size} form fields" else "") +
+            (if (p.preliminary) " · preparing editing…" else "")
         pagePill.visibility = View.VISIBLE
         zoomBox.visibility = View.VISIBLE
         undoBox.visibility = View.VISIBLE
@@ -309,7 +323,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             formBanner.visibility = View.VISIBLE
             formBanner.postDelayed({ formBanner.visibility = View.GONE }, 5000)
         }
-        if (!p.editable) {
+        if (!p.editable && !p.preliminary) {
             Toast.makeText(this, "This PDF can be viewed, but it can't be edited", Toast.LENGTH_LONG).show()
         }
         // open straight into full-screen reading (forms stay in normal mode so they're easy to fill)
@@ -327,7 +341,45 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         }
     }
 
+    /** Swaps the instant preview for the fully read document, staying on the same page. */
+    private fun upgrade(full: OpenedPdf) {
+        val old = pdf ?: return
+        val keep = doc.currentPage()
+        val sameFile = full.displayFile.absolutePath == old.displayFile.absolutePath
+        val sameSizes = full.geoms.size == old.geoms.size && full.geoms.indices.all {
+            kotlin.math.abs(full.geoms[it].dispW - old.geoms[it].dispW) < 0.5f && kotlin.math.abs(full.geoms[it].dispH - old.geoms[it].dispH) < 0.5f
+        }
+        when {
+            !sameFile -> {
+                val r = try { PageRenderer(full.displayFile) } catch (e: Throwable) { return }
+                renderer?.close()
+                renderer = r
+                pdf = full
+                resetSearch()
+                doc.setDocument(full.geoms, r, full.widgets, items)
+                doc.post { doc.goToPage(keep) }
+            }
+            !sameSizes -> {
+                pdf = full
+                doc.setDocument(full.geoms, renderer ?: return, full.widgets, items)
+                doc.post { doc.goToPage(keep) }
+            }
+            else -> {
+                pdf = full
+                doc.updateForm(full.geoms, full.widgets)
+            }
+        }
+        doc.drawAllValues = !full.valuesBaked && full.fields.isNotEmpty()
+        toolbar.subtitle = "${full.geoms.size} page${if (full.geoms.size == 1) "" else "s"}" +
+            if (full.fields.isNotEmpty()) " · ${full.fields.size} form fields" else ""
+        if (!full.editable) Toast.makeText(this, "This PDF can be viewed, but it can't be edited", Toast.LENGTH_LONG).show()
+    }
+
     private fun requireEditable(): Boolean {
+        if (preparing) {
+            Toast.makeText(this, "Getting the editing tools ready for this long document — just a moment", Toast.LENGTH_SHORT).show()
+            return false
+        }
         val p = pdf ?: return false
         if (!p.editable) {
             Toast.makeText(this, "This PDF can be viewed, but it can't be edited", Toast.LENGTH_SHORT).show()
