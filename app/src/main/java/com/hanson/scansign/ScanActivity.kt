@@ -16,6 +16,10 @@ import android.widget.ProgressBar
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.TextView
+import android.widget.LinearLayout
+import android.graphics.Color
+import androidx.core.content.ContextCompat
+import kotlin.coroutines.resume
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.IntentSenderRequest
@@ -41,6 +45,11 @@ data class ScanPage(val original: File, var page: File)
 /** Pages of the document being scanned. Lives as long as the app process. */
 object ScanSession {
     val pages = ArrayList<ScanPage>()
+    /** The look chosen on the first page; every page of this document uses it (null = not chosen yet). */
+    var filter: ScanFilter? = null
+
+    /** Starts a new document. */
+    fun reset() { pages.clear(); filter = null }
 }
 
 class ScanActivity : BaseActivity() {
@@ -176,7 +185,7 @@ class ScanActivity : BaseActivity() {
             .setMessage("Your pages stay here until you save or discard them.")
             .setPositiveButton("Keep for later") { _, _ -> finish() }
             .setNegativeButton("Discard pages") { _, _ ->
-                ScanSession.pages.clear()
+                ScanSession.reset()
                 finish()
             }
             .setNeutralButton("Stay", null)
@@ -197,10 +206,12 @@ class ScanActivity : BaseActivity() {
         if (uris.isEmpty()) return@registerForActivityResult
         progress.visibility = View.VISIBLE
         lifecycleScope.launch {
-            val filter = Settings.defaultFilter(this@ScanActivity)
+            val origs = withContext(Dispatchers.IO) { uris.mapNotNull { u -> Storage.copyUriToWork(this@ScanActivity, u, "jpg") } }
+            if (origs.isEmpty()) { progress.visibility = View.GONE; return@launch }
+            // first pages of a new document: let the user pick the look, then use it for every page
+            val filter = ScanSession.filter ?: chooseFilter(origs[0]).also { ScanSession.filter = it }
             val pages = withContext(Dispatchers.IO) {
-                uris.mapNotNull { u ->
-                    val orig = Storage.copyUriToWork(this@ScanActivity, u, "jpg") ?: return@mapNotNull null
+                origs.mapNotNull { orig ->
                     if (filter == ScanFilter.ORIGINAL) return@mapNotNull ScanPage(orig, orig)
                     val bmp = ImageUtils.load(orig) ?: return@mapNotNull ScanPage(orig, orig)
                     val out = Storage.newWorkFile(this@ScanActivity, "jpg")
@@ -215,6 +226,70 @@ class ScanActivity : BaseActivity() {
             adapter.notifyDataSetChanged()
             list.scrollToPosition(ScanSession.pages.size - 1)
             refreshEmpty()
+        }
+    }
+
+    /**
+     * Shows the first page in every look side by side and returns the one picked
+     * (closing the picker keeps the default from Settings).
+     */
+    private suspend fun chooseFilter(sample: File): ScanFilter {
+        val def = Settings.defaultFilter(this)
+        val previews = withContext(Dispatchers.Default) {
+            val small = ImageUtils.load(sample, 520) ?: return@withContext null
+            val out = ScanFilter.values().associateWith { f -> try { Scanner.applyFilter(small, f) } catch (_: Throwable) { small } }
+            out
+        } ?: return def
+        progress.visibility = View.GONE
+        return kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+            val d = resources.displayMetrics.density
+            val cols = if (Ui.isTablet(this)) 5 else 3
+            val grid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding((16 * d).toInt(), (4 * d).toInt(), (16 * d).toInt(), 0) }
+            grid.addView(TextView(this).apply {
+                text = "Every page of this document will use it. You can still change single pages later."
+                textSize = 13f
+                setTextColor(ContextCompat.getColor(this@ScanActivity, R.color.md_on_surface_variant))
+                setPadding(0, 0, 0, (10 * d).toInt())
+            })
+            var dialog: androidx.appcompat.app.AlertDialog? = null
+            var picked: ScanFilter? = null
+            val accent = ContextCompat.getColor(this, Themes.accent(this).primary)
+            for (row in ScanFilter.values().toList().chunked(cols)) {
+                val line = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                grid.addView(line, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = (10 * d).toInt() })
+                for (f in row) {
+                    val card = com.google.android.material.card.MaterialCardView(this).apply {
+                        radius = 14 * d
+                        strokeWidth = if (f == def) (3 * d).toInt() else (1 * d).toInt()
+                        strokeColor = if (f == def) accent else ContextCompat.getColor(this@ScanActivity, R.color.md_outline)
+                        cardElevation = 0f
+                        isClickable = true
+                        setOnClickListener { picked = f; dialog?.dismiss() }
+                    }
+                    val inner = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = android.view.Gravity.CENTER_HORIZONTAL; setPadding((6 * d).toInt(), (6 * d).toInt(), (6 * d).toInt(), (8 * d).toInt()) }
+                    inner.addView(android.widget.ImageView(this).apply {
+                        setImageBitmap(previews[f]); scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+                        setBackgroundColor(Color.rgb(235, 238, 243))
+                    }, LinearLayout.LayoutParams(-1, (130 * d).toInt()))
+                    inner.addView(TextView(this).apply {
+                        text = if (f == def) "${f.label} ★" else f.label
+                        textSize = 12.5f; gravity = android.view.Gravity.CENTER
+                        setTypeface(typeface, if (f == def) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+                        setPadding(0, (6 * d).toInt(), 0, 0)
+                    })
+                    card.addView(inner)
+                    line.addView(card, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = (8 * d).toInt() })
+                }
+                // keep the last row's tiles the same size as the others
+                repeat(cols - row.size) { line.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f).apply { marginEnd = (8 * d).toInt() }) }
+            }
+            dialog = MaterialAlertDialogBuilder(this)
+                .setTitle("Choose a look for this document")
+                .setView(android.widget.ScrollView(this).apply { addView(grid) })
+                .setNegativeButton("Use ${def.label}") { _, _ -> picked = def }
+                .setOnDismissListener { if (cont.isActive) cont.resume(picked ?: def) }
+                .show()
+            cont.invokeOnCancellation { try { dialog?.dismiss() } catch (_: Throwable) {} }
         }
     }
 
@@ -403,7 +478,7 @@ class ScanActivity : BaseActivity() {
                 return@launch
             }
             val (file, exported) = result
-            ScanSession.pages.clear()
+            ScanSession.reset()
             adapter.notifyDataSetChanged()
             refreshEmpty()
             MaterialAlertDialogBuilder(this@ScanActivity)
