@@ -17,42 +17,81 @@ Screenshots: take 4–8 phone screenshots on your S23 (home, scanner, editor wit
 - **Contact email:** (your email) · **Website:** https://phoenicx.org
 
 ## Short description (80 max)
-Scan, edit, sign and fill PDFs. Merge, compress and OCR — offline, no ads.
 
-## Full description
-Docora is a complete PDF editor and document scanner for Android — fast, private and with every feature unlocked.
+```
+Scan, edit, sign & fill PDFs. Every feature free: no ads, no subscription.
+```
 
-SCAN DOCUMENTS
-• AI document scanner with automatic edge detection and auto-capture
-• Removes shadows, stains and fingers; perspective correction
-• Multi-page scans, filters (Magic color, Black & white, Grayscale)
-• ID card mode – front and back on one page
-• Searchable PDFs with on-device text recognition (OCR)
+## Full description (4000 max)
 
-EDIT & SIGN
-• Open any PDF – even large, password-protected or damaged files
-• Add your signature: draw it with your finger or photograph it (background removed automatically)
-• Add text, stamps (Approved, Paid, Date…), images, highlights, shapes and freehand drawing
-• Rotate, resize and move everything; undo and redo
+```
+Docora is a complete PDF editor and document scanner — and everything is free. No subscription, no ads, no watermark, no account and no locked "pro" features. It works offline and your files never leave your phone.
+
+★ EDIT PDF (BETA)
+• Change existing text: tap any line or paragraph and type — the new words keep the original size, colour and spacing
+• Keeps bold and italic, and uses the PDF's own font whenever it can
+• Move, resize, replace or delete pictures and logos
+• Find & replace words across the whole document
+• Black out private details — permanently removed when you save
+• Works on scanned documents too, with on-device text recognition
+
+★ SCAN DOCUMENTS
+• AI scanner with automatic edge detection and auto capture
+• Removes shadows, stains and fingers
+• Choose the look on the first page — Auto, Magic colour, Original, Grayscale or Black & white — and the whole document uses it
+• Adjust corners by hand with a magnifier
+• Multi-page scans, ID cards (both sides on one page), A4 / Letter
+• Searchable PDFs: scanned text becomes searchable and copyable
+
+★ SIGN & FILL
+• Add your signature — photograph it (the background is removed automatically) or draw it with your finger
+• Save signatures as transparent PNG files
 • Fill PDF forms directly on the page
-• Select and copy text from any page
+• Quick fill: save your name, initials, address, email and phone once and add them to any form with one tap, plus today's date and ✓ ✗ marks
+• Add text (bold, italic, three fonts, any colour), stamps, dates, images
 
-PDF TOOLS
-• Merge PDFs with drag-to-reorder
-• Split, extract and organize pages (reorder, rotate, delete, duplicate)
-• Compress PDFs and see the real file size before saving or sharing
-• PDF to JPG, images to PDF
-• Extract text (OCR) – English, German, French, Spanish, Hindi and more
-• Lock or unlock PDFs with a password
-• Watermarks and page numbers
-• Print directly
+★ ANNOTATE
+• Draw, highlight, shapes, arrows, whiteout
+• Move, resize and rotate everything you add
+• Undo and redo
 
-DESIGNED FOR YOU
-• Light, dark and pure-black themes with 7 accent colours
-• Works great on phones and tablets
+★ READ
+• Opens any PDF, even 1000+ pages, password-protected or damaged files
+• Full-screen reading, smooth zoom, fast scrolling
+• Find text with highlighted matches — even in scanned documents
+• Page thumbnails to jump through long documents
 • Night reading mode
-• No account, no ads, no watermarks
-• Works offline – your documents stay on your device
+• Select and copy text with a long press
+
+★ PDF TOOLS
+• Merge (drag to reorder), split, extract and organize pages
+• Rotate, delete, duplicate and add blank pages
+• Compress PDFs — see the new size before sharing
+• PDF to JPG and images to PDF
+• Extract text (OCR) — English, German and other Latin-script languages, plus Hindi / Devanagari
+• Lock with a password (AES) or remove a password
+• Watermarks and page numbers
+• Print
+
+★ YOUR FILES
+• Recently opened and recently edited tabs
+• PDFs from WhatsApp, Gmail or Files open in Docora and stay available later
+• Save over the original or as a new copy
+• Share with size options — perfect for WhatsApp and email limits
+
+★ DESIGN
+• Modern, clean interface with a floating toolbar
+• Light, dark or system theme, 7 accent colours, pure black mode
+• Made for phones and tablets
+
+★ PRIVATE BY DESIGN
+• Everything happens on your phone — nothing is uploaded
+• No account and no tracking
+
+Every feature, for everyone, free.
+
+Made with ♥ by Hanson · phoenicx.org
+```
 
 ## App content answers (Play Console)
 - **Ads:** No
