@@ -88,7 +88,8 @@ class CropActivity : BaseActivity() {
         btnNext = findViewById(R.id.btnNext)
 
         mode = intent.getStringExtra(EXTRA_MODE) ?: MODE_DOC
-        filter = Settings.defaultFilter(this)
+        // a document keeps the look chosen on its first page
+        filter = if (mode == MODE_SIG) Settings.defaultFilter(this) else ScanSession.filter ?: Settings.defaultFilter(this)
 
         toolbar.setNavigationOnClickListener { goBack() }
         val isSig = mode == MODE_SIG
@@ -233,6 +234,7 @@ class CropActivity : BaseActivity() {
     private fun savePage() {
         val w = warped ?: return
         val f = filter
+        if (mode != MODE_SIG && ScanSession.filter == null) ScanSession.filter = f
         setBusy(true)
         lifecycleScope.launch {
             val out = Storage.newWorkFile(this@CropActivity, "jpg")
@@ -261,12 +263,14 @@ class CropActivity : BaseActivity() {
         }
         toolbar.title = when {
             isSig -> "Crop signature"
-            show -> "Choose a look"
+            show && ScanSession.filter == null -> "Choose a look for this document"
+            show -> "Page look"
             else -> "Adjust corners"
         }
         hint.text = when {
             isSig -> "Fit the signature inside the 4:3 box. Drag to move, drag a corner to resize."
-            show -> "Auto removes shadows and picks colour or greyscale · change the default in Settings"
+            show && ScanSession.filter == null -> "Pick the look for this page — every page you add to this document will use it"
+            show -> "Using this document's look (${ScanSession.filter?.label}) · tap another to change just this page"
             else -> "Drag the corners or edges to fit the page. A magnifier helps with precision."
         }
     }
