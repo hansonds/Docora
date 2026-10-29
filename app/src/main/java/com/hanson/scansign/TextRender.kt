@@ -16,19 +16,25 @@ object TextRender {
     /** Stamp frame line width, as a fraction of the font size. */
     const val FRAME = 0.12f
 
-    fun typeface(font: TextFont, bold: Boolean): Typeface {
+    fun typeface(font: TextFont, bold: Boolean, italic: Boolean = false): Typeface {
         val family = when (font) {
             TextFont.SANS -> Typeface.SANS_SERIF
             TextFont.SERIF -> Typeface.SERIF
             TextFont.MONO -> Typeface.MONOSPACE
         }
-        return Typeface.create(family, if (bold) Typeface.BOLD else Typeface.NORMAL)
+        val style = when {
+            bold && italic -> Typeface.BOLD_ITALIC
+            bold -> Typeface.BOLD
+            italic -> Typeface.ITALIC
+            else -> Typeface.NORMAL
+        }
+        return Typeface.create(family, style)
     }
 
     fun lines(text: String): List<String> = text.split('\n').ifEmpty { listOf("") }
 
     fun paint(item: TextItem, pxPerPt: Float): Paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
-        typeface = typeface(item.font, item.bold)
+        typeface = typeface(item.font, item.bold, item.italic)
         textSize = item.sizePt * pxPerPt
         color = item.color
         textScaleX = item.scaleX

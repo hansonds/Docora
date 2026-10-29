@@ -79,5 +79,11 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Bold" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/italic"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Italic" />
     </LinearLayout>
 </ScrollView>
