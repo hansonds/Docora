@@ -274,6 +274,45 @@ object BetaEdit {
         return overlap > min(ra.width(), rb.width()) * 0.3f && abs(ra.left - rb.left) < max(ra.width(), rb.width()) * 0.6f
     }
 
+    // ------------------------------------------------------------------ alignment
+
+    /** Alignment of a paragraph, from where its lines start and end. */
+    fun blockAlign(lines: List<TextLine>, g: PageGeom): TextAlign {
+        if (lines.size < 2) return singleAlign(lines.firstOrNull() ?: return TextAlign.LEFT)
+        val size = lines.map { it.sizePt }.sorted()[lines.size / 2]
+        val tol = size * 0.7f / g.dispW
+        fun spread(v: List<Float>) = (v.maxOrNull() ?: 0f) - (v.minOrNull() ?: 0f)
+        val lefts = lines.map { it.rect.left }
+        val rights = lines.map { it.rect.right }
+        val centers = lines.map { it.rect.centerX() }
+        val leftOk = spread(lefts) < tol
+        val bodyRights = rights.dropLast(1)
+        return when {
+            leftOk && bodyRights.size >= 2 && spread(bodyRights) < tol -> TextAlign.JUSTIFY
+            !leftOk && spread(centers) < tol -> TextAlign.CENTER
+            !leftOk && spread(rights) < tol -> TextAlign.RIGHT
+            else -> TextAlign.LEFT
+        }
+    }
+
+    /** A line on its own: centred headings sit in the middle of the page. */
+    private fun singleAlign(line: TextLine): TextAlign {
+        val r = line.rect
+        return if (kotlin.math.abs(r.centerX() - 0.5f) < 0.015f && r.left > 0.12f) TextAlign.CENTER else TextAlign.LEFT
+    }
+
+    /** Alignment for editing just [line]: follows its paragraph (a justified line stays full width). */
+    fun lineAlign(lay: PageLayout, line: TextLine, g: PageGeom): TextAlign {
+        val block = lay.blockOf(line)
+        if (block.lines.size < 2) return singleAlign(line)
+        return when (blockAlign(block.lines, g)) {
+            TextAlign.JUSTIFY -> if (line === block.lines.last()) TextAlign.LEFT else TextAlign.JUSTIFY_ALL
+            TextAlign.CENTER -> TextAlign.CENTER
+            TextAlign.RIGHT -> TextAlign.RIGHT
+            else -> TextAlign.LEFT
+        }
+    }
+
     // ------------------------------------------------------------------ pictures
 
     /** Where each picture is drawn on the page. */

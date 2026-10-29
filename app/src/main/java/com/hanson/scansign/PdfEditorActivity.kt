@@ -697,7 +697,8 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     /** A replacement for [lines] that looks like the original: same place, size, ink, spacing and letter width. */
     private suspend fun buildReplacement(
         page: Int, lines: List<TextLine>, text: String, font: TextFont, bold: Boolean,
-        italic: Boolean = lines.count { it.italic } * 2 > lines.size
+        italic: Boolean = lines.count { it.italic } * 2 > lines.size,
+        align: TextAlign = TextAlign.LEFT
     ): ReplacedText {
         val g = pdf!!.geoms[page]
         val bmp = pageBitmap(page, 1400)
@@ -718,10 +719,11 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             actual += ((l.xe.last() - l.xs.first()) * g.dispW)
         }
         val scale = if (natural > 0f) (actual / natural).coerceIn(0.75f, 1.25f) else 1f
-        val wrapPt = area.width() * g.dispW * 1.03f + size * 0.3f
+        // left-aligned text gets a little room; centred / right / justified keep the exact original width
+        val wrapPt = if (align == TextAlign.LEFT) area.width() * g.dispW * 1.03f + size * 0.3f else area.width() * g.dispW
         val origFont = lines.mapNotNull { it.fontName }.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
         return ReplacedText(page, text, ink, size, bold, font, area.left, lines[0].baseline - size * TextRender.ASCENT / g.dispH,
-            gap, cover, bg, scale, wrapPt, text, origFont).also { it.italic = italic }
+            gap, cover, bg, scale, wrapPt, text, origFont).also { it.italic = italic; it.align = align }
     }
 
     /** Paragraph lines joined into running text (a hyphen at a line end joins the word). */
@@ -740,7 +742,8 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     private fun startTyping(lay: PageLayout, line: TextLine) {
         commitEdit()
         lifecycleScope.launch {
-            val item = buildReplacement(lay.page, listOf(line), line.text, line.font, line.bold)
+            val item = buildReplacement(lay.page, listOf(line), line.text, line.font, line.bold,
+                align = BetaEdit.lineAlign(lay, line, pdf!!.geoms[lay.page]))
             items.add(item)
             typingIsNew = true
             typingBackup = null
@@ -777,6 +780,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         typeBox.setText(item.plain)
         styleTypeBox()
         typeBox.visibility = View.VISIBLE
+        typeHandle.visibility = View.VISIBLE
         // small text: zoom in so it's comfortable to type
         doc.fracToScreen(item.page, item.cover)?.let { doc.zoomToFit(it, 30 * resources.displayMetrics.density) }
         positionTyping()
@@ -806,6 +810,41 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         typeBox.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, item.sizePt * px)
         if (android.os.Build.VERSION.SDK_INT >= 28) typeBox.lineHeight = (item.lineGap * item.sizePt * px).toInt().coerceAtLeast(1)
         else typeBox.setLineSpacing(0f, item.lineGap / 1.17f)
+        typeBox.gravity = android.view.Gravity.TOP or when (item.align) {
+            TextAlign.CENTER -> android.view.Gravity.CENTER_HORIZONTAL
+            TextAlign.RIGHT -> android.view.Gravity.END
+            else -> android.view.Gravity.START
+        }
+        typeBox.justificationMode = if (item.align == TextAlign.JUSTIFY || item.align == TextAlign.JUSTIFY_ALL)
+            android.text.Layout.JUSTIFICATION_MODE_INTER_WORD else android.text.Layout.JUSTIFICATION_MODE_NONE
+    }
+
+    private val typeHandle: View by lazy {
+        findViewById<View>(R.id.typeHandle).also { h ->
+            var downX = 0f; var startW = 0f; var startFx = 0f
+            h.setOnTouchListener { v, e ->
+                val item = typing ?: return@setOnTouchListener false
+                val g = pdf?.geoms?.getOrNull(item.page) ?: return@setOnTouchListener false
+                val px = doc.pxPerPtOn(item.page)
+                when (e.actionMasked) {
+                    android.view.MotionEvent.ACTION_DOWN -> {
+                        downX = e.rawX; startW = item.wrapPt; startFx = item.fx
+                        v.parent?.requestDisallowInterceptTouchEvent(true)
+                    }
+                    android.view.MotionEvent.ACTION_MOVE -> {
+                        val centre = item.align == TextAlign.CENTER
+                        // centred text grows on both sides, everything else to the right
+                        val dPt = (e.rawX - downX) / px * (if (centre) 2f else 1f)
+                        val maxW = if (centre) g.dispW else (1f - startFx) * g.dispW
+                        val w = (startW + dPt).coerceIn(item.sizePt * 1.5f, maxW)
+                        item.wrapPt = w
+                        if (centre) item.fx = (startFx + (startW - w) / 2f / g.dispW).coerceIn(0f, 1f)
+                        positionTyping()
+                    }
+                }
+                true
+            }
+        }
     }
 
     private fun positionTyping() {
@@ -815,10 +854,17 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         val tl = doc.fracToScreen(item.page, android.graphics.RectF(item.fx, item.fy, item.fx, item.fy)) ?: return
         val lp = typeBox.layoutParams as FrameLayout.LayoutParams
         lp.gravity = android.view.Gravity.TOP or android.view.Gravity.START
-        lp.width = (item.wrapPt * px).toInt().coerceAtLeast((48 * resources.displayMetrics.density).toInt())
+        lp.width = (item.wrapPt * px + 3f).toInt().coerceAtLeast((48 * resources.displayMetrics.density).toInt())
         lp.leftMargin = tl.left.toInt()
         lp.topMargin = tl.top.toInt()
         typeBox.layoutParams = lp
+        // width handle on the right edge, beside the first line
+        val hl = typeHandle.layoutParams as FrameLayout.LayoutParams
+        val hs = (30 * resources.displayMetrics.density).toInt()
+        hl.gravity = android.view.Gravity.TOP or android.view.Gravity.START
+        hl.leftMargin = lp.leftMargin + lp.width - hs / 2
+        hl.topMargin = (lp.topMargin + item.sizePt * px * 0.6f - hs / 2f).toInt()
+        typeHandle.layoutParams = hl
         // keep the text size in step with zoom
         val want = item.sizePt * px
         if (kotlin.math.abs(typeBox.textSize - want) > 0.5f) styleTypeBox()
@@ -850,6 +896,15 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         }
         chip("Bold", item.bold) { item.bold = !item.bold; item.origFont = null; styleTypeBox() }
         chip("Italic", item.italic) { item.italic = !item.italic; item.origFont = null; styleTypeBox() }
+        chip("≡ ${item.align.label}") { c ->
+            item.align = when (item.align) {
+                TextAlign.LEFT -> TextAlign.CENTER
+                TextAlign.CENTER -> TextAlign.RIGHT
+                TextAlign.RIGHT -> TextAlign.JUSTIFY
+                else -> TextAlign.LEFT
+            }
+            c.text = "≡ ${item.align.label}"; styleTypeBox()
+        }
         chip("A−") { item.sizePt = (item.sizePt * 0.92f).coerceAtLeast(3f); styleTypeBox() }
         chip("A+") { item.sizePt = (item.sizePt * 1.08f).coerceAtMost(200f); styleTypeBox() }
         // text colour: the original ink found on the page, or black / blue / red
@@ -875,7 +930,9 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         lifecycleScope.launch {
             val lines = if (whole) lay.blockOf(line).lines else listOf(line)
             val text = if (whole) joinLines(lines) else line.text
-            val item = buildReplacement(lay.page, lines, text, old.font, old.bold, old.italic)
+            val g = pdf!!.geoms[lay.page]
+            val item = buildReplacement(lay.page, lines, text, old.font, old.bold, old.italic,
+                if (whole) BetaEdit.blockAlign(lines, g) else BetaEdit.lineAlign(lay, line, g))
             val i = items.indexOf(old)
             if (i >= 0) items[i] = item else items.add(item)
             typingWhole = whole
@@ -898,6 +955,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(typeBox.windowToken, 0)
         typeBox.clearFocus()
         typeBox.visibility = View.GONE
+        typeHandle.visibility = View.GONE
         findViewById<View>(R.id.typeBar).visibility = View.GONE
         findViewById<View>(R.id.toolsScroll).visibility = View.VISIBLE
         if (betaMode) findViewById<View>(R.id.betaHeader).visibility = View.VISIBLE

@@ -58,6 +58,9 @@ data class PageGeom(val llx: Float, val lly: Float, val w: Float, val h: Float, 
 
 enum class TextFont(val label: String) { SANS("Sans"), SERIF("Serif"), MONO("Mono") }
 
+/** How lines sit in their box. JUSTIFY stretches every line but the last; JUSTIFY_ALL stretches all. */
+enum class TextAlign(val label: String) { LEFT("Left"), CENTER("Centre"), RIGHT("Right"), JUSTIFY("Justify"), JUSTIFY_ALL("Justify") }
+
 /** Something the user added on top of a page. Positions are fractions of the displayed page (top-left origin). */
 sealed class EditItem {
     abstract val page: Int
@@ -107,9 +110,10 @@ open class TextItem(
     var lineGap: Float = TextRender.LINE,
     /** Letter width (1 = normal); lets a stand-in font match the original's spacing. */
     var scaleX: Float = 1f,
-    var italic: Boolean = false
+    var italic: Boolean = false,
+    var align: TextAlign = TextAlign.LEFT
 ) : EditItem() {
-    override fun copy(): EditItem = TextItem(page, text, color, sizePt, bold, font, fx, fy, boxed, rotation, lineGap, scaleX, italic)
+    override fun copy(): EditItem = TextItem(page, text, color, sizePt, bold, font, fx, fy, boxed, rotation, lineGap, scaleX, italic, align)
 }
 
 /**
@@ -132,6 +136,7 @@ class ReplacedText(
     override fun copy(): EditItem = ReplacedText(page, text, color, sizePt, bold, font, fx, fy, lineGap, RectF(cover), coverColor, scaleX, wrapPt, plain, origFont).also {
         it.rotation = rotation
         it.italic = italic
+        it.align = align
     }
 }
 
