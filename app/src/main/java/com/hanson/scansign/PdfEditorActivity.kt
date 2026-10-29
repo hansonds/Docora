@@ -618,7 +618,10 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     private val typeBox: EditText by lazy { findViewById(R.id.typeBox) }
 
     /** A replacement for [lines] that looks like the original: same place, size, ink, spacing and letter width. */
-    private suspend fun buildReplacement(page: Int, lines: List<TextLine>, text: String, font: TextFont, bold: Boolean): ReplacedText {
+    private suspend fun buildReplacement(
+        page: Int, lines: List<TextLine>, text: String, font: TextFont, bold: Boolean,
+        italic: Boolean = lines.count { it.italic } * 2 > lines.size
+    ): ReplacedText {
         val g = pdf!!.geoms[page]
         val bmp = pageBitmap(page, 1400)
         val area = android.graphics.RectF(lines[0].rect).also { r -> lines.forEach { r.union(it.rect) } }
@@ -629,7 +632,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         val gap = if (lines.size > 1) ((lines.last().baseline - lines[0].baseline) / (lines.size - 1) * g.dispH / size).coerceIn(0.9f, 3f)
         else TextRender.LINE
         // letter width: make the stand-in font as wide as the original words
-        val probe = TextItem(page, "", ink, size, bold, font, 0f, 0f)
+        val probe = TextItem(page, "", ink, size, bold, font, 0f, 0f, italic = italic)
         val p = TextRender.paint(probe, 1f)
         var natural = 0f; var actual = 0f
         for (l in lines) {
@@ -641,7 +644,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         val wrapPt = area.width() * g.dispW * 1.03f + size * 0.3f
         val origFont = lines.mapNotNull { it.fontName }.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
         return ReplacedText(page, text, ink, size, bold, font, area.left, lines[0].baseline - size * TextRender.ASCENT / g.dispH,
-            gap, cover, bg, scale, wrapPt, text, origFont)
+            gap, cover, bg, scale, wrapPt, text, origFont).also { it.italic = italic }
     }
 
     /** Paragraph lines joined into running text (a hyphen at a line end joins the word). */
@@ -720,7 +723,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     private fun styleTypeBox() {
         val item = typing ?: return
         val px = doc.pxPerPtOn(item.page)
-        typeBox.typeface = TextRender.typeface(item.font, item.bold)
+        typeBox.typeface = TextRender.typeface(item.font, item.bold, item.italic)
         typeBox.textScaleX = item.scaleX
         typeBox.setTextColor(item.color)
         typeBox.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, item.sizePt * px)
@@ -769,10 +772,21 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             c.text = "Aa ${item.font.label}"; styleTypeBox()
         }
         chip("Bold", item.bold) { item.bold = !item.bold; item.origFont = null; styleTypeBox() }
+        chip("Italic", item.italic) { item.italic = !item.italic; item.origFont = null; styleTypeBox() }
         chip("A−") { item.sizePt = (item.sizePt * 0.92f).coerceAtLeast(3f); styleTypeBox() }
         chip("A+") { item.sizePt = (item.sizePt * 1.08f).coerceAtMost(200f); styleTypeBox() }
+        // text colour: the original ink found on the page, or black / blue / red
         val inks = intArrayOf(typingInk, Color.BLACK, Color.rgb(16, 48, 160), Color.rgb(200, 30, 45))
-        chip("● Colour") { item.color = inks[(inks.indexOf(item.color).coerceAtLeast(0) + 1) % inks.size]; styleTypeBox() }
+        val inkNames = arrayOf("Original colour", "Black", "Blue", "Red")
+        fun inkLabel() = inkNames[inks.indexOf(item.color).coerceAtLeast(0)]
+        fun dot(c: Int) = android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(c); setStroke(2, Color.GRAY)
+        }
+        chip(inkLabel()) { c ->
+            item.color = inks[(inks.indexOf(item.color).coerceAtLeast(0) + 1) % inks.size]
+            c.text = inkLabel(); c.chipIcon = dot(item.color); styleTypeBox()
+        }
+        (bar.getChildAt(bar.childCount - 1) as Chip).apply { chipIcon = dot(item.color); isChipIconVisible = true }
         chip("Delete") { typeBox.setText(""); finishTyping(true) }
     }
 
@@ -784,7 +798,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         lifecycleScope.launch {
             val lines = if (whole) lay.blockOf(line).lines else listOf(line)
             val text = if (whole) joinLines(lines) else line.text
-            val item = buildReplacement(lay.page, lines, text, old.font, old.bold)
+            val item = buildReplacement(lay.page, lines, text, old.font, old.bold, old.italic)
             val i = items.indexOf(old)
             if (i >= 0) items[i] = item else items.add(item)
             typingWhole = whole
@@ -828,7 +842,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                 record()
             }
             typingIsNew && raw == typingOriginal && backup == null && item.font == typingLine?.font &&
-                item.bold == typingLine?.bold && item.color == typingInk && !typingWhole -> items.remove(item)
+                item.bold == typingLine?.bold && item.italic == (typingLine?.italic ?: false) && item.color == typingInk && !typingWhole -> items.remove(item)
             else -> {
                 item.plain = raw
                 item.text = TextRender.wrap(item, raw, item.wrapPt)
@@ -960,7 +974,8 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                         added.add(
                             if (replacement.isEmpty()) ShapeItem(page, ShapeKind.FILL, cover.left, cover.top, cover.width(), cover.height(), bg, 1f)
                             else ReplacedText(page, replacement, ink, line.sizePt, line.bold, line.font, area.left,
-                                line.baseline - line.sizePt * TextRender.ASCENT / g.dispH, TextRender.LINE, cover, bg)
+                                line.baseline - line.sizePt * TextRender.ASCENT / g.dispH, TextRender.LINE, cover, bg,
+                                origFont = line.fontName).also { it.italic = line.italic }
                         )
                         count++
                         pages.add(page)
@@ -1453,6 +1468,8 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         val colors = view.findViewById<LinearLayout>(R.id.colors)
         val fonts = view.findViewById<ChipGroup>(R.id.fonts)
         val bold = view.findViewById<MaterialSwitch>(R.id.bold)
+        val italic = view.findViewById<MaterialSwitch>(R.id.italic)
+        italic.isChecked = existing?.italic ?: prefs.getBoolean("italic", false)
 
         var color = existing?.color ?: prefs.getInt("color", COLORS[0])
         var font = existing?.font ?: runCatching { TextFont.valueOf(prefs.getString("font", "SANS")!!) }.getOrDefault(TextFont.SANS)
@@ -1515,17 +1532,19 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                 // an untouched slider keeps the exact size (detected sizes aren't whole numbers)
                 val sizePt = if (existing != null && slider.value == size.coerceIn(6f, 72f).toInt().toFloat()) existing.sizePt else slider.value
                 if (existing !is ReplacedText) prefs.edit().putInt("color", color).putFloat("size", sizePt)
-                    .putBoolean("bold", bold.isChecked).putString("font", font.name).apply()
+                    .putBoolean("bold", bold.isChecked).putBoolean("italic", italic.isChecked).putString("font", font.name).apply()
                 if (existing != null) {
                     existing.text = text
                     existing.color = color
                     existing.sizePt = sizePt
                     existing.bold = bold.isChecked
+                    if (existing.italic != italic.isChecked && existing is ReplacedText) existing.origFont = null
+                    existing.italic = italic.isChecked
                     existing.font = font
                     record()
                     doc.refresh()
                 } else {
-                    addText(text, color, sizePt, bold.isChecked, font)
+                    addText(text, color, sizePt, bold.isChecked, font, italic = italic.isChecked)
                 }
             }
             .setNegativeButton("Cancel", null)
@@ -1540,11 +1559,11 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         input.requestFocus()
     }
 
-    private fun addText(text: String, color: Int, sizePt: Float, bold: Boolean, font: TextFont, boxed: Boolean = false) {
+    private fun addText(text: String, color: Int, sizePt: Float, bold: Boolean, font: TextFont, boxed: Boolean = false, italic: Boolean = false) {
         val page = doc.currentPage()
         val size = doc.pageSizePt(page)
         val c = doc.visibleCenterOn(page)
-        val item = TextItem(page, text, color, sizePt, bold, font, 0f, 0f, boxed)
+        val item = TextItem(page, text, color, sizePt, bold, font, 0f, 0f, boxed, italic = italic)
         val (wPt, hPt) = TextRender.sizePt(item)
         item.fx = (c.x - wPt / size.x / 2).coerceIn(0f, 0.95f)
         item.fy = (c.y - hPt / size.y / 2).coerceIn(0f, 0.95f)

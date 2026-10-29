@@ -290,10 +290,13 @@ object PdfSaver {
         }
     }
 
-    private fun pdfFont(item: TextItem): PDFont = when (item.font) {
-        TextFont.SANS -> if (item.bold) PDType1Font.HELVETICA_BOLD else PDType1Font.HELVETICA
-        TextFont.SERIF -> if (item.bold) PDType1Font.TIMES_BOLD else PDType1Font.TIMES_ROMAN
-        TextFont.MONO -> if (item.bold) PDType1Font.COURIER_BOLD else PDType1Font.COURIER
+    private fun pdfFont(item: TextItem): PDFont {
+        val b = item.bold; val i = item.italic
+        return when (item.font) {
+            TextFont.SANS -> when { b && i -> PDType1Font.HELVETICA_BOLD_OBLIQUE; b -> PDType1Font.HELVETICA_BOLD; i -> PDType1Font.HELVETICA_OBLIQUE; else -> PDType1Font.HELVETICA }
+            TextFont.SERIF -> when { b && i -> PDType1Font.TIMES_BOLD_ITALIC; b -> PDType1Font.TIMES_BOLD; i -> PDType1Font.TIMES_ITALIC; else -> PDType1Font.TIMES_ROMAN }
+            TextFont.MONO -> when { b && i -> PDType1Font.COURIER_BOLD_OBLIQUE; b -> PDType1Font.COURIER_BOLD; i -> PDType1Font.COURIER_OBLIQUE; else -> PDType1Font.COURIER }
+        }
     }
 
     /**

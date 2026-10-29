@@ -43,7 +43,8 @@ class TextLine(
     val bold: Boolean,
     val font: TextFont,
     /** Name of the PDF's own font (null for scanned text). */
-    val fontName: String? = null
+    val fontName: String? = null,
+    val italic: Boolean = false
 ) {
     val rect get() = RectF(xs.firstOrNull() ?: 0f, top, xe.lastOrNull() ?: 0f, bottom)
 }
@@ -70,7 +71,7 @@ object BetaEdit {
 
     // ------------------------------------------------------------------ text from the PDF itself
 
-    private class Glyph(val ch: Char, val l: Float, val r: Float, val base: Float, val size: Float, val font: PDFont?)
+    private class Glyph(val ch: Char, val l: Float, val r: Float, val base: Float, val size: Float, val font: PDFont?, val slanted: Boolean = false)
 
     fun pdfLayout(doc: PDDocument, page: Int, g: PageGeom): PageLayout {
         val w = g.dispW.coerceAtLeast(1f)
@@ -85,7 +86,7 @@ object BetaEdit {
                     val cw = max(tp.width, 0.5f) / n
                     u.forEachIndexed { i, ch ->
                         if (ch.isWhitespace()) cur.add(null)
-                        else cur.add(Glyph(ch, tp.x + cw * i, tp.x + cw * (i + 1), tp.y, sizeOf(tp), tp.font))
+                        else cur.add(Glyph(ch, tp.x + cw * i, tp.x + cw * (i + 1), tp.y, sizeOf(tp), tp.font, slanted(tp)))
                     }
                 }
             }
@@ -142,18 +143,50 @@ object BetaEdit {
         return TextLine(
             page, sb.toString(), xs.toFloatArray(), xe.toFloatArray(),
             (base - size * 0.92f) / h, (base + size * 0.26f) / h, base / h,
-            size, isBold(font), family(font), try { font?.name } catch (_: Throwable) { null }
+            size,
+            // the style most of the line's letters use
+            glyphs.count { isBold(it.font) } * 2 > glyphs.size, family(font), try { font?.name } catch (_: Throwable) { null },
+            glyphs.count { isItalic(it.font) || it.slanted } * 2 > glyphs.size
         )
     }
 
     private fun fontName(f: PDFont?) = (try { f?.name } catch (_: Throwable) { null } ?: "").lowercase()
 
+    private val boldCache = HashMap<PDFont, Boolean>()
+    private val italicCache = HashMap<PDFont, Boolean>()
+
     private fun isBold(f: PDFont?): Boolean {
-        val n = fontName(f)
-        if (listOf("bold", "black", "heavy", "semibold", "demi").any { it in n }) return true
-        val d = try { f?.fontDescriptor } catch (_: Throwable) { null } ?: return false
-        return d.isForceBold || d.fontWeight >= 600f
+        f ?: return false
+        return boldCache.getOrPut(f) {
+            val n = fontName(f).substringAfter('+')
+            val style = n.substringAfterLast('-', "").substringAfterLast(',', n.substringAfterLast('-', ""))
+            if (listOf("bold", "black", "heavy", "semibold", "demibold", "demi", "extrabold", "ultrabold").any { it in n }) return@getOrPut true
+            // short style codes such as "Arial-BdMT", "Futura-Bd", "...,Bd"
+            if (Regex("^(bd|bdit|bdi|blk|hv|sb|xb)").containsMatchIn(style)) return@getOrPut true
+            val d = try { f.fontDescriptor } catch (_: Throwable) { null } ?: return@getOrPut false
+            d.isForceBold || d.fontWeight >= 600f || (d.stemV >= 120f && d.fontWeight == 0f)
+        }
     }
+
+    private fun isItalic(f: PDFont?): Boolean {
+        f ?: return false
+        return italicCache.getOrPut(f) {
+            val n = fontName(f).substringAfter('+')
+            if (listOf("italic", "oblique", "inclined", "kursiv", "slanted").any { it in n }) return@getOrPut true
+            val style = n.substringAfterLast('-', "").substringAfterLast(',', n.substringAfterLast('-', ""))
+            if (Regex("^(it|bdit|bi|bolditalic|i$)").containsMatchIn(style) || style.endsWith("it")) return@getOrPut true
+            val d = try { f.fontDescriptor } catch (_: Throwable) { null } ?: return@getOrPut false
+            d.isItalic || kotlin.math.abs(d.italicAngle) > 4f
+        }
+    }
+
+    /** Letters made italic by slanting (no italic font, just a skewed text matrix). */
+    private fun slanted(tp: TextPosition): Boolean = try {
+        val m = tp.textMatrix
+        val a = m.getValue(0, 0); val b = m.getValue(0, 1); val c = m.getValue(1, 0); val d = m.getValue(1, 1)
+        // upright text with a sideways lean of the vertical axis
+        abs(b) < abs(a) * 0.05f && abs(c) > abs(d) * 0.12f && abs(c) < abs(d) * 0.6f
+    } catch (_: Throwable) { false }
 
     private fun family(f: PDFont?): TextFont {
         val n = fontName(f)

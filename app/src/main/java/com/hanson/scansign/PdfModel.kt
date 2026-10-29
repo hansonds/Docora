@@ -106,9 +106,10 @@ open class TextItem(
     /** Distance between lines, as a multiple of the font size. */
     var lineGap: Float = TextRender.LINE,
     /** Letter width (1 = normal); lets a stand-in font match the original's spacing. */
-    var scaleX: Float = 1f
+    var scaleX: Float = 1f,
+    var italic: Boolean = false
 ) : EditItem() {
-    override fun copy(): EditItem = TextItem(page, text, color, sizePt, bold, font, fx, fy, boxed, rotation, lineGap, scaleX)
+    override fun copy(): EditItem = TextItem(page, text, color, sizePt, bold, font, fx, fy, boxed, rotation, lineGap, scaleX, italic)
 }
 
 /**
@@ -130,6 +131,7 @@ class ReplacedText(
 ) : TextItem(page, text, color, sizePt, bold, font, fx, fy, false, 0f, lineGap, scaleX) {
     override fun copy(): EditItem = ReplacedText(page, text, color, sizePt, bold, font, fx, fy, lineGap, RectF(cover), coverColor, scaleX, wrapPt, plain, origFont).also {
         it.rotation = rotation
+        it.italic = italic
     }
 }
 
