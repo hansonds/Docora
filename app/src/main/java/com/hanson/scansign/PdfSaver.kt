@@ -364,21 +364,24 @@ object PdfSaver {
             left += TextRender.PAD * size
             top += TextRender.PAD * size
         }
-        lines.forEachIndexed { k, line ->
-            if (line.isEmpty()) return@forEachIndexed
+        // same line / word positions as the screen; each piece is stretched to exactly its on-screen width
+        TextRender.layout(item).forEachIndexed { k, runs ->
             val baseV = top + size * (TextRender.ASCENT + item.lineGap * k)
-            val o = T(left, baseV)
-            val ux = T(left + 1f, baseV)
-            val up = T(left, baseV - 1f)
-            cs.beginText()
-            cs.setFont(font, size)
-            // the stand-in font is stretched to match the original; the original font needs no stretching
-            if (own == null && item.scaleX != 1f) cs.setHorizontalScaling(item.scaleX * 100f)
-            cs.setNonStrokingColor(r, gr, b)
-            cs.setTextMatrix(Matrix(ux.x - o.x, ux.y - o.y, up.x - o.x, up.y - o.y, o.x, o.y))
-            cs.showText(line)
-            if (own == null && item.scaleX != 1f) cs.setHorizontalScaling(100f)
-            cs.endText()
+            for (run in runs) {
+                val natural = try { font.getStringWidth(run.text) / 1000f * size } catch (_: Throwable) { 0f }
+                val scale = if (natural > 0f) (run.w / natural * 100f).coerceIn(60f, 160f) else 100f
+                val o = T(left + run.x, baseV)
+                val ux = T(left + run.x + 1f, baseV)
+                val up = T(left + run.x, baseV - 1f)
+                cs.beginText()
+                cs.setFont(font, size)
+                if (kotlin.math.abs(scale - 100f) > 0.5f) cs.setHorizontalScaling(scale)
+                cs.setNonStrokingColor(r, gr, b)
+                cs.setTextMatrix(Matrix(ux.x - o.x, ux.y - o.y, up.x - o.x, up.y - o.y, o.x, o.y))
+                cs.showText(run.text)
+                if (kotlin.math.abs(scale - 100f) > 0.5f) cs.setHorizontalScaling(100f)
+                cs.endText()
+            }
         }
     }
 

@@ -47,6 +47,8 @@ object TextRender {
     fun wrap(item: TextItem, text: String, widthPt: Float): String {
         if (widthPt <= 0f) return text
         val p = paint(item, 1f)
+        // tiny tolerance: text measured to exactly the original width must still fit
+        @Suppress("NAME_SHADOWING") val widthPt = widthPt * 1.002f + 0.3f
         val out = ArrayList<String>()
         for (para in text.split('\n')) {
             var line = ""
@@ -68,11 +70,48 @@ object TextRender {
         return out.joinToString("\n")
     }
 
-    /** Width and height of the text box in points. */
-    fun sizePt(item: TextItem): Pair<Float, Float> {
+    /** A piece of text placed on a line: [x] and [w] in points from the left of the text box. */
+    class Run(val text: String, val x: Float, val w: Float)
+
+    /** Width of the box lines are aligned in (the original column for replaced text). */
+    fun boxWidthPt(item: TextItem): Float {
+        val p = paint(item, 1f)
+        val widest = lines(item.text).maxOf { p.measureText(it) }
+        val wrap = (item as? ReplacedText)?.wrapPt ?: 0f
+        return if (item.align != TextAlign.LEFT && wrap > 0f) kotlin.math.max(wrap, widest) else widest
+    }
+
+    /**
+     * Where every line (and, for justified text, every word) goes. Used for both the screen and
+     * the saved PDF, so they match exactly.
+     */
+    fun layout(item: TextItem): List<List<Run>> {
         val p = paint(item, 1f)
         val ls = lines(item.text)
-        val w = ls.maxOf { p.measureText(it) }.coerceAtLeast(item.sizePt * 0.6f)
+        val box = boxWidthPt(item)
+        return ls.mapIndexed { k, line ->
+            val w = p.measureText(line)
+            val justify = (item.align == TextAlign.JUSTIFY && k < ls.size - 1) || item.align == TextAlign.JUSTIFY_ALL
+            val words = line.split(' ').filter { it.isNotEmpty() }
+            when {
+                line.isEmpty() -> emptyList()
+                justify && words.size > 1 && box > w -> {
+                    val widths = words.map { p.measureText(it) }
+                    val gap = (box - widths.sum()) / (words.size - 1)
+                    var x = 0f
+                    words.mapIndexed { i, word -> Run(word, x, widths[i]).also { x += widths[i] + gap } }
+                }
+                item.align == TextAlign.CENTER -> listOf(Run(line, (box - w) / 2f, w))
+                item.align == TextAlign.RIGHT -> listOf(Run(line, box - w, w))
+                else -> listOf(Run(line, 0f, w))
+            }
+        }
+    }
+
+    /** Width and height of the text box in points. */
+    fun sizePt(item: TextItem): Pair<Float, Float> {
+        val ls = lines(item.text)
+        val w = boxWidthPt(item).coerceAtLeast(item.sizePt * 0.6f)
         val h = ((ls.size - 1) * item.lineGap + LINE) * item.sizePt
         if (item.boxed) {
             val pad = 2 * PAD * item.sizePt
@@ -100,8 +139,9 @@ object TextRender {
             l += PAD * size
             t += PAD * size
         }
-        lines(item.text).forEachIndexed { k, line ->
-            canvas.drawText(line, l, t + size * (ASCENT + item.lineGap * k), p)
+        layout(item).forEachIndexed { k, runs ->
+            val base = t + size * (ASCENT + item.lineGap * k)
+            for (r in runs) canvas.drawText(r.text, l + r.x * pxPerPt, base, p)
         }
     }
 }
