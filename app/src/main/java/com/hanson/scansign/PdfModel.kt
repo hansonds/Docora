@@ -124,9 +124,11 @@ class ReplacedText(
     /** Width (points) the text wraps at, so it stays inside the original column. */
     var wrapPt: Float = 0f,
     /** The words as typed (before wrapping into lines). */
-    var plain: String = text
+    var plain: String = text,
+    /** The PDF's own font: used when saving if it has every letter typed. */
+    var origFont: String? = null
 ) : TextItem(page, text, color, sizePt, bold, font, fx, fy, false, 0f, lineGap, scaleX) {
-    override fun copy(): EditItem = ReplacedText(page, text, color, sizePt, bold, font, fx, fy, lineGap, RectF(cover), coverColor, scaleX, wrapPt, plain).also {
+    override fun copy(): EditItem = ReplacedText(page, text, color, sizePt, bold, font, fx, fy, lineGap, RectF(cover), coverColor, scaleX, wrapPt, plain, origFont).also {
         it.rotation = rotation
     }
 }
@@ -151,8 +153,10 @@ class InkItem(
 
 enum class ShapeKind(val label: String) {
     RECT("Box"), ELLIPSE("Circle"), LINE("Line"), ARROW("Arrow"), WHITEOUT("Whiteout"), HIGHLIGHT("Highlight box"),
-    /** Solid box in [ShapeItem.color]: hides deleted text / pictures, or blacks out (redaction). */
-    FILL("Cover")
+    /** Solid box in [ShapeItem.color]: hides deleted text / pictures. */
+    FILL("Cover"),
+    /** Black out (redaction): on save the page is flattened so what's underneath is really removed. */
+    REDACT("Black out")
 }
 
 /**

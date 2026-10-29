@@ -8,6 +8,7 @@ import org.opencv.android.OpenCVLoader
 class App : Application() {
     override fun onCreate() {
         super.onCreate()
+        CrashReport.install(this)
         Themes.init(this)
         PDFBoxResourceLoader.init(applicationContext)
         openCvReady = try {

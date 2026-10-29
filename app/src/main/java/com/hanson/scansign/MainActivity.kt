@@ -131,6 +131,7 @@ class MainActivity : BaseActivity() {
             Toast.makeText(this, "Edge detection engine failed to load — manual cropping still works", Toast.LENGTH_LONG).show()
         }
         if (savedInstanceState == null) handleIncoming(intent)
+        if (savedInstanceState == null) CrashReport.offer(this)
     }
 
     private fun tile(id: Int, icon: Int, hue: IconTiles.Hue, title: String, sub: String, onClick: () -> Unit) {

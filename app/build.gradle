@@ -11,8 +11,8 @@ android {
         applicationId "com.hanson.docora"
         minSdk 26
         targetSdk 36
-        versionCode 23
-        versionName "4.9.3"
+        versionCode 24
+        versionName "5.0"
         ndk {
             abiFilters 'arm64-v8a', 'armeabi-v7a'
         }
@@ -20,10 +20,20 @@ android {
 
     signingConfigs {
         release {
-            storeFile file('scansign.jks')
-            storePassword 'scansign123'
-            keyAlias 'scansign'
-            keyPassword 'scansign123'
+            // CI uses the private key from GitHub Secrets when it is set (see .github/workflows/build.yml);
+            // otherwise the old key in the repo, so builds keep working until the switch.
+            def ks = System.getenv('DOCORA_KEYSTORE')
+            if (ks) {
+                storeFile file(ks)
+                storePassword System.getenv('DOCORA_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('DOCORA_KEY_ALIAS')
+                keyPassword System.getenv('DOCORA_KEY_PASSWORD')
+            } else {
+                storeFile file('scansign.jks')
+                storePassword 'scansign123'
+                keyAlias 'scansign'
+                keyPassword 'scansign123'
+            }
         }
     }
 

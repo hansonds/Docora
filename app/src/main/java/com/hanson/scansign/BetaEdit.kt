@@ -41,7 +41,9 @@ class TextLine(
     val baseline: Float,
     val sizePt: Float,
     val bold: Boolean,
-    val font: TextFont
+    val font: TextFont,
+    /** Name of the PDF's own font (null for scanned text). */
+    val fontName: String? = null
 ) {
     val rect get() = RectF(xs.firstOrNull() ?: 0f, top, xe.lastOrNull() ?: 0f, bottom)
 }
@@ -140,7 +142,7 @@ object BetaEdit {
         return TextLine(
             page, sb.toString(), xs.toFloatArray(), xe.toFloatArray(),
             (base - size * 0.92f) / h, (base + size * 0.26f) / h, base / h,
-            size, isBold(font), family(font)
+            size, isBold(font), family(font), try { font?.name } catch (_: Throwable) { null }
         )
     }
 
