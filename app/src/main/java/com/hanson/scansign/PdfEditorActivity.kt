@@ -238,23 +238,52 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
 
     // ---------------- opening ----------------
 
-    /** A long document is on screen while its editing / form data is still being read. */
+    /** A long document shown for reading only: its editing / form data hasn't been read yet. */
+    private var needsFull = false
+    /** That data is being read right now. */
     private var preparing = false
+    /** The editing action to continue with once it's ready. */
+    private var afterPrepare: (() -> Unit)? = null
+
+    /** Reads a long document's editing data (only when an editing tool is used), then runs [then]. */
+    private fun prepareEditing(then: (() -> Unit)?) {
+        if (then != null) afterPrepare = then
+        if (preparing) return
+        preparing = true
+        setLoading(true, "Getting editing ready…")
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) { PdfOpener.open(this@PdfEditorActivity, source, null) }
+            preparing = false
+            needsFull = false
+            setLoading(false, null)
+            val next = afterPrepare
+            afterPrepare = null
+            if (result is OpenResult.Ok) {
+                upgrade(result.pdf)
+                if (result.pdf.editable) next?.invoke()
+            } else {
+                Toast.makeText(this@PdfEditorActivity, "This PDF can be read, but it can't be edited", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    /** Runs an editing [action] now, or after the editing data of a long document has been read. */
+    private fun editing(action: () -> Unit) {
+        if (requireEditable(action)) action()
+    }
 
     private fun open(password: String?) {
         setLoading(true, "Opening…")
         lifecycleScope.launch {
             // long documents: show the pages straight away, read the rest in the background
             val quick = if (password == null) withContext(Dispatchers.IO) { PdfOpener.quickOpen(source) } else null
-            if (quick != null) { preparing = true; show(quick) }
-            val result = withContext(Dispatchers.IO) { PdfOpener.open(this@PdfEditorActivity, source, password) }
             if (quick != null) {
-                preparing = false
-                if (pdf !== quick) return@launch
-                if (result is OpenResult.Ok) upgrade(result.pdf)
-                else toolbar.subtitle = "${quick.geoms.size} pages · view only"
+                // just reading needs nothing more; editing data is read when an editing tool is first used
+                needsFull = true
+                show(quick)
                 return@launch
             }
+            val result = withContext(Dispatchers.IO) { PdfOpener.open(this@PdfEditorActivity, source, password) }
             when (result) {
                 is OpenResult.Ok -> show(result.pdf)
                 OpenResult.NeedPassword -> askPassword(false)
@@ -313,8 +342,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         doc.drawAllValues = !p.valuesBaked && p.fields.isNotEmpty()
         setLoading(false, null)
         toolbar.subtitle = "${p.geoms.size} page${if (p.geoms.size == 1) "" else "s"}" +
-            (if (p.fields.isNotEmpty()) " · ${p.fields.size} form fields" else "") +
-            (if (p.preliminary) " · preparing editing…" else "")
+            (if (p.fields.isNotEmpty()) " · ${p.fields.size} form fields" else "")
         pagePill.visibility = View.VISIBLE
         zoomBox.visibility = View.VISIBLE
         undoBox.visibility = View.VISIBLE
@@ -375,11 +403,8 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         if (!full.editable) Toast.makeText(this, "This PDF can be viewed, but it can't be edited", Toast.LENGTH_LONG).show()
     }
 
-    private fun requireEditable(): Boolean {
-        if (preparing) {
-            Toast.makeText(this, "Getting the editing tools ready for this long document — just a moment", Toast.LENGTH_SHORT).show()
-            return false
-        }
+    private fun requireEditable(retry: (() -> Unit)? = null): Boolean {
+        if (needsFull || preparing) { prepareEditing(retry); return false }
         val p = pdf ?: return false
         if (!p.editable) {
             Toast.makeText(this, "This PDF can be viewed, but it can't be edited", Toast.LENGTH_SHORT).show()
@@ -503,7 +528,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     private var pendingImageRect: Pair<Int, android.graphics.RectF>? = null
 
     private fun enterBeta() {
-        if (!requireEditable()) return
+        if (!requireEditable { enterBeta() }) return
         if (fullscreen) setFullscreen(false)
         if (searching) closeFind()
         commitEdit()
@@ -1690,7 +1715,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             when (item.itemId) {
                 11 -> setFullscreen(true)
                 12 -> openFind()
-                3 -> if (requireEditable()) quickSave()
+                3 -> editing { quickSave() }
                 10 -> compressCurrent()
                 4 -> pagesSheet()
                 5 -> shareCurrent()
@@ -1804,7 +1829,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         findViewById<View>(R.id.betaDone).setOnClickListener { exitBeta() }
         findViewById<View>(R.id.typeDone).setOnClickListener { finishTyping(true) }
         findViewById<View>(R.id.typeCancel).setOnClickListener { finishTyping(false) }
-        findViewById<View>(R.id.betaSave).setOnClickListener { if (requireEditable()) quickSave() }
+        findViewById<View>(R.id.betaSave).setOnClickListener { editing { quickSave() } }
         buildNormalTools()
     }
 
@@ -1813,19 +1838,19 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         bar.removeAllViews()
         toolViews.clear()
         toolButton(bar, "Sign", R.drawable.ic_sign) {
-            if (requireEditable()) { setTool(ActiveTool.NONE); pendingSigWidget = null; pickSignature.launch(SignaturesActivity.intent(this, pick = true)) }
+            editing { setTool(ActiveTool.NONE); pendingSigWidget = null; pickSignature.launch(SignaturesActivity.intent(this, pick = true)) }
         }
         toolButton(bar, "Edit PDF", R.drawable.ic_edit_doc, beta = true) { enterBeta() }
-        toolButton(bar, "Quick fill", R.drawable.ic_idcard) { if (requireEditable()) { setTool(ActiveTool.NONE); quickFillSheet() } }
-        toolButton(bar, "Text", R.drawable.ic_text) { if (requireEditable()) { setTool(ActiveTool.NONE); textDialog(null) } }
-        toolButton(bar, "Draw", R.drawable.ic_draw, ActiveTool.PEN) { if (requireEditable()) setTool(ActiveTool.PEN) }
-        toolButton(bar, "Highlight", R.drawable.ic_highlight, ActiveTool.HIGHLIGHT) { if (requireEditable()) setTool(ActiveTool.HIGHLIGHT) }
-        toolButton(bar, "Shapes", R.drawable.ic_shapes, ActiveTool.SHAPE) { if (requireEditable()) setTool(ActiveTool.SHAPE) }
-        toolButton(bar, "Whiteout", R.drawable.ic_eraser, ActiveTool.WHITEOUT) { if (requireEditable()) setTool(ActiveTool.WHITEOUT) }
+        toolButton(bar, "Quick fill", R.drawable.ic_idcard) { editing { setTool(ActiveTool.NONE); quickFillSheet() } }
+        toolButton(bar, "Text", R.drawable.ic_text) { editing { setTool(ActiveTool.NONE); textDialog(null) } }
+        toolButton(bar, "Draw", R.drawable.ic_draw, ActiveTool.PEN) { editing { setTool(ActiveTool.PEN) } }
+        toolButton(bar, "Highlight", R.drawable.ic_highlight, ActiveTool.HIGHLIGHT) { editing { setTool(ActiveTool.HIGHLIGHT) } }
+        toolButton(bar, "Shapes", R.drawable.ic_shapes, ActiveTool.SHAPE) { editing { setTool(ActiveTool.SHAPE) } }
+        toolButton(bar, "Whiteout", R.drawable.ic_eraser, ActiveTool.WHITEOUT) { editing { setTool(ActiveTool.WHITEOUT) } }
         toolButton(bar, "Image", R.drawable.ic_image) {
-            if (requireEditable()) { setTool(ActiveTool.NONE); pickImage.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+            editing { setTool(ActiveTool.NONE); pickImage.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
         }
-        toolButton(bar, "Stamp", R.drawable.ic_stamp) { if (requireEditable()) { setTool(ActiveTool.NONE); stampDialog() } }
+        toolButton(bar, "Stamp", R.drawable.ic_stamp) { editing { setTool(ActiveTool.NONE); stampDialog() } }
         dockDivider(bar)
         toolButton(bar, "Pages", R.drawable.ic_pages) { setTool(ActiveTool.NONE); openPages() }
         toolButton(bar, "Get text", R.drawable.ic_ocr) { setTool(ActiveTool.NONE); extractText() }
