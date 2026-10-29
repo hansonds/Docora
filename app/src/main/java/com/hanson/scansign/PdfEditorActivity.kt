@@ -432,8 +432,11 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     }
 
     override fun onItemTapped(item: EditItem) {
-        if (betaMode && item is ReplacedText) startTyping(item)
-        else if (item is TextItem) textDialog(item)
+        if (item is ReplacedText) {
+            // text changed in Edit PDF always reopens there (switching back into Edit PDF if needed)
+            if (!betaMode) enterBeta()
+            if (betaMode) startTyping(item)
+        } else if (item is TextItem) textDialog(item)
     }
 
     override fun onItemsChanged() {

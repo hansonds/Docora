@@ -1245,7 +1245,8 @@ class PdfDocView @JvmOverloads constructor(
         // items first (topmost last in list)
         for (item in items.asReversed()) {
             if (hits(item, x, y)) {
-                if (item === selected) listener?.onItemTapped(item) else select(item)
+                // in Edit PDF, text changed there opens for typing straight away
+                if (item === selected || (pickMode && item is ReplacedText)) listener?.onItemTapped(item) else select(item)
                 return
             }
         }
