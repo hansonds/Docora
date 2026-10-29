@@ -210,7 +210,9 @@ class OpenedPdf(
     val geoms: List<PageGeom>,
     val fields: List<FormField>,
     val widgets: List<FormWidget>,
-    val editable: Boolean
+    val editable: Boolean,
+    /** Shown straight away while the full version (forms, editing) is prepared in the background. */
+    val preliminary: Boolean = false
 )
 
 sealed class OpenResult {
@@ -223,6 +225,27 @@ sealed class OpenResult {
 object PdfOpener {
 
     fun memory(): MemoryUsageSetting = MemoryUsageSetting.setupMixed(48L * 1024 * 1024)
+
+    /** Above this many pages the reader opens instantly and prepares editing in the background. */
+    const val QUICK_PAGES = 150
+
+    /**
+     * Instant view of a long document with the phone's own PDF renderer (no parsing): every page is
+     * assumed to be the size of page 1 until the full open has measured them. Null when not worth it.
+     */
+    fun quickOpen(src: File): OpenedPdf? = try {
+        ParcelFileDescriptor.open(src, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
+            PdfRenderer(fd).use { r ->
+                val n = r.pageCount
+                if (n < QUICK_PAGES) return null
+                val p = r.openPage(0)
+                val g = try { PageGeom(0f, 0f, p.width.toFloat().coerceAtLeast(1f), p.height.toFloat().coerceAtLeast(1f), 0) } finally { p.close() }
+                OpenedPdf(src, src, false, List(n) { g }, emptyList(), emptyList(), editable = false, preliminary = true)
+            }
+        }
+    } catch (e: Throwable) {
+        null   // password-protected or unusual: use the normal open
+    }
 
     /** Opens any PDF: handles passwords, encryption and damaged files. Call off the main thread. */
     fun open(ctx: Context, src: File, password: String?): OpenResult {
@@ -243,12 +266,14 @@ object PdfOpener {
                     doc.save(dec)
                     renderFile = dec
                 }
-                geoms = readGeoms(doc)
-                val (f, w) = readForm(doc)
+                val pageGeoms = readGeoms(doc)
+                geoms = pageGeoms
+                val (f, w) = readForm(doc, pageGeoms)
                 fields = f
                 widgets = w
-                // Android's renderer doesn't draw form values or annotations: bake them into a display copy
-                if (fields.isNotEmpty() || hasVisibleAnnotations(doc)) {
+                // Android's renderer doesn't draw form values or annotations: bake them into a display copy.
+                // (Not for very long books without forms: rewriting thousands of pages takes too long.)
+                if (fields.isNotEmpty() || (doc.numberOfPages <= 500 && hasVisibleAnnotations(doc))) {
                     try {
                         valuesBaked = bake(doc)
                         val disp = Storage.newWorkFile(ctx, "pdf")
@@ -388,7 +413,7 @@ object PdfOpener {
         return out
     }
 
-    private fun readForm(doc: PDDocument): Pair<List<FormField>, List<FormWidget>> {
+    private fun readForm(doc: PDDocument, geoms: List<PageGeom>): Pair<List<FormField>, List<FormWidget>> {
         val form = doc.documentCatalog.acroForm ?: return Pair(emptyList(), emptyList())
         val fields = ArrayList<FormField>()
         val widgets = ArrayList<FormWidget>()
@@ -412,7 +437,6 @@ object PdfOpener {
             return idx[w.cosObject] ?: -1
         }
 
-        val geoms = readGeoms(doc)
         for (f in form.fieldTree) {
             try {
                 val type = when (f) {

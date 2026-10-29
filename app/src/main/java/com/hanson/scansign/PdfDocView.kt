@@ -477,6 +477,13 @@ class PdfDocView @JvmOverloads constructor(
 
     val pageCount: Int get() = geoms.size
 
+    /** Same pages, now with exact page data and form fields (after a quick preview). */
+    fun updateForm(geoms: List<PageGeom>, widgets: List<FormWidget>) {
+        this.geoms = geoms
+        this.widgetsByPage = widgets.groupBy { it.page }
+        invalidate()
+    }
+
     fun goToPage(index: Int) {
         if (geoms.isEmpty()) return
         val i = index.coerceIn(0, geoms.size - 1)
