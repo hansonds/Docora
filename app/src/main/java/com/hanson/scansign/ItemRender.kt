@@ -140,8 +140,8 @@ object ItemRender {
                             style = Paint.Style.STROKE; strokeWidth = 1f; color = Color.LTGRAY
                         })
                     }
-                    ShapeKind.FILL -> {
-                        canvas.drawRect(box, Paint().apply { color = item.color })
+                    ShapeKind.FILL, ShapeKind.REDACT -> {
+                        canvas.drawRect(box, Paint().apply { color = if (item.kind == ShapeKind.REDACT) Color.BLACK else item.color })
                         if (selected) canvas.drawRect(box, Paint(Paint.ANTI_ALIAS_FLAG).apply {
                             style = Paint.Style.STROKE; strokeWidth = 1f; color = Color.GRAY
                         })

@@ -43,7 +43,7 @@ object PdfSaver {
                             }
                             is TextItem -> {
                                 if (item is ReplacedText) drawCover(cs, g, item.cover, item.coverColor)
-                                drawText(doc, cs, g, item)
+                                drawText(doc, cs, g, item, page)
                             }
                             is InkItem -> drawInk(cs, g, item)
                             is ShapeItem -> drawShape(cs, g, item)
@@ -60,6 +60,46 @@ object PdfSaver {
             }
             doc.save(out)
         }
+        val redacted = items.filter { it is ShapeItem && it.kind == ShapeKind.REDACT }.map { it.page }.toSortedSet()
+        if (redacted.isNotEmpty()) flattenPages(out, redacted)
+    }
+
+    /**
+     * Real redaction: pages with a black-out are replaced by a picture of the finished page,
+     * so the covered text, pictures and hidden layers no longer exist in the file.
+     */
+    private fun flattenPages(file: File, pages: Set<Int>) {
+        val tmp = File(file.parentFile, file.name + ".redacting")
+        val fd = android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+        val renderer = android.graphics.pdf.PdfRenderer(fd)
+        try {
+            PDDocument.load(file, PdfOpener.memory()).use { doc ->
+                val originals = pages.filter { it in 0 until doc.numberOfPages }.associateWith { doc.getPage(it) }
+                for ((index, old) in originals) {
+                    val box = old.cropBox
+                    val rot = ((old.rotation % 360) + 360) % 360
+                    val w = if (rot == 90 || rot == 270) box.height else box.width
+                    val h = if (rot == 90 || rot == 270) box.width else box.height
+                    val page = renderer.openPage(index)
+                    val scale = (2.4f).coerceAtMost(3000f / kotlin.math.max(w, h))
+                    val bmp = Bitmap.createBitmap((w * scale).toInt().coerceAtLeast(1), (h * scale).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+                    bmp.eraseColor(Color.WHITE)
+                    page.render(bmp, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
+                    page.close()
+                    val img = JPEGFactory.createFromImage(doc, bmp, 0.9f)
+                    bmp.recycle()
+                    val flat = com.tom_roush.pdfbox.pdmodel.PDPage(com.tom_roush.pdfbox.pdmodel.common.PDRectangle(w, h))
+                    PDPageContentStream(doc, flat).use { it.drawImage(img, 0f, 0f, w, h) }
+                    doc.pages.insertBefore(flat, old)
+                    doc.removePage(old)
+                }
+                doc.save(tmp)
+            }
+        } finally {
+            try { renderer.close() } catch (_: Throwable) {}
+            try { fd.close() } catch (_: Throwable) {}
+        }
+        if (tmp.exists() && tmp.length() > 0) { file.delete(); tmp.renameTo(file) }
     }
 
     private fun applyForm(doc: PDDocument, fields: List<FormField>) {
@@ -183,6 +223,7 @@ object PdfSaver {
             ShapeKind.RECT -> { quad(); cs.stroke() }
             ShapeKind.WHITEOUT -> { cs.setNonStrokingColor(1f, 1f, 1f); quad(); cs.fill() }
             ShapeKind.FILL -> { quad(); cs.fill() }
+            ShapeKind.REDACT -> { cs.setNonStrokingColor(0f, 0f, 0f); quad(); cs.fill() }
             ShapeKind.HIGHLIGHT -> { cs.setGraphicsStateParameters(alphaState(0.35f)); quad(); cs.fill() }
             ShapeKind.ELLIPSE -> {
                 // bezier ellipse in page fractions, each point mapped (works on rotated pages)
@@ -255,8 +296,31 @@ object PdfSaver {
         TextFont.MONO -> if (item.bold) PDType1Font.COURIER_BOLD else PDType1Font.COURIER
     }
 
-    private fun drawText(doc: PDDocument, cs: PDPageContentStream, g: PageGeom, item: TextItem) {
-        val font = pdfFont(item)
+    /**
+     * The PDF's own font for replaced text, if the page has it and it contains every letter
+     * (embedded fonts usually hold only the letters the original text used).
+     */
+    private fun originalFont(page: com.tom_roush.pdfbox.pdmodel.PDPage, item: TextItem): PDFont? {
+        val name = (item as? ReplacedText)?.origFont ?: return null
+        return try {
+            val res = page.resources ?: return null
+            val font = res.fontNames.asSequence().mapNotNull { n -> try { res.getFont(n) } catch (_: Throwable) { null } }
+                .firstOrNull { it.name == name } ?: return null
+            if (font !is com.tom_roush.pdfbox.pdmodel.font.PDVectorFont) return null
+            for (line in TextRender.lines(item.text)) {
+                if (line.isEmpty()) continue
+                val input = java.io.ByteArrayInputStream(font.encode(line))
+                while (input.available() > 0) {
+                    if (!(font as com.tom_roush.pdfbox.pdmodel.font.PDVectorFont).hasGlyph(font.readCode(input))) return null
+                }
+            }
+            font
+        } catch (_: Throwable) { null }
+    }
+
+    private fun drawText(doc: PDDocument, cs: PDPageContentStream, g: PageGeom, item: TextItem, page: com.tom_roush.pdfbox.pdmodel.PDPage? = null) {
+        val own = page?.let { originalFont(it, item) }
+        val font = own ?: pdfFont(item)
         val lines = TextRender.lines(item.text)
         val encodable = try {
             lines.forEach { font.encode(it) }
@@ -305,11 +369,12 @@ object PdfSaver {
             val up = T(left, baseV - 1f)
             cs.beginText()
             cs.setFont(font, size)
-            if (item.scaleX != 1f) cs.setHorizontalScaling(item.scaleX * 100f)
+            // the stand-in font is stretched to match the original; the original font needs no stretching
+            if (own == null && item.scaleX != 1f) cs.setHorizontalScaling(item.scaleX * 100f)
             cs.setNonStrokingColor(r, gr, b)
             cs.setTextMatrix(Matrix(ux.x - o.x, ux.y - o.y, up.x - o.x, up.y - o.y, o.x, o.y))
             cs.showText(line)
-            if (item.scaleX != 1f) cs.setHorizontalScaling(100f)
+            if (own == null && item.scaleX != 1f) cs.setHorizontalScaling(100f)
             cs.endText()
         }
     }

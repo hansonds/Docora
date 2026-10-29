@@ -179,7 +179,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         editorRoot.addOnLayoutChangeListener(relayoutChrome)
         dock.addOnLayoutChangeListener(relayoutChrome)
         topBar.addOnLayoutChangeListener(relayoutChrome)
-        pagePill.setOnClickListener { goToPageDialog() }
+        pagePill.setOnClickListener { pagesSheet() }
         textBar = findViewById(R.id.textBar)
         findViewById<MaterialButton>(R.id.selCopy).setOnClickListener {
             (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager)
@@ -498,6 +498,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         toolButton(bar, "Pictures", R.drawable.ic_image, ActiveTool.BETA_IMAGE) { setTool(ActiveTool.BETA_IMAGE) }
         toolButton(bar, "Replace", R.drawable.ic_find_replace) { setTool(ActiveTool.BETA_TEXT); findReplaceDialog() }
         toolButton(bar, "Add text", R.drawable.ic_text) { setTool(ActiveTool.BETA_TEXT); textDialog(null) }
+        toolButton(bar, "Quick fill", R.drawable.ic_idcard) { setTool(ActiveTool.BETA_TEXT); quickFillSheet() }
         toolButton(bar, "Add image", R.drawable.ic_photo) {
             setTool(ActiveTool.BETA_TEXT)
             pendingImageRect = null
@@ -638,8 +639,9 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         }
         val scale = if (natural > 0f) (actual / natural).coerceIn(0.75f, 1.25f) else 1f
         val wrapPt = area.width() * g.dispW * 1.03f + size * 0.3f
+        val origFont = lines.mapNotNull { it.fontName }.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
         return ReplacedText(page, text, ink, size, bold, font, area.left, lines[0].baseline - size * TextRender.ASCENT / g.dispH,
-            gap, cover, bg, scale, wrapPt, text)
+            gap, cover, bg, scale, wrapPt, text, origFont)
     }
 
     /** Paragraph lines joined into running text (a hyphen at a line end joins the word). */
@@ -763,9 +765,10 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         }
         chip("Aa ${item.font.label}") { c ->
             item.font = TextFont.values()[(item.font.ordinal + 1) % TextFont.values().size]
+            item.origFont = null   // the user chose a style: don't switch back to the PDF's font when saving
             c.text = "Aa ${item.font.label}"; styleTypeBox()
         }
-        chip("Bold", item.bold) { item.bold = !item.bold; styleTypeBox() }
+        chip("Bold", item.bold) { item.bold = !item.bold; item.origFont = null; styleTypeBox() }
         chip("A−") { item.sizePt = (item.sizePt * 0.92f).coerceAtLeast(3f); styleTypeBox() }
         chip("A+") { item.sizePt = (item.sizePt * 1.08f).coerceAtMost(200f); styleTypeBox() }
         val inks = intArrayOf(typingInk, Color.BLACK, Color.rgb(16, 48, 160), Color.rgb(200, 30, 45))
@@ -1618,7 +1621,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                 12 -> openFind()
                 3 -> if (requireEditable()) quickSave()
                 10 -> compressCurrent()
-                4 -> goToPageDialog()
+                4 -> pagesSheet()
                 5 -> shareCurrent()
                 8 -> printCurrent()
                 9 -> {
@@ -1742,6 +1745,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             if (requireEditable()) { setTool(ActiveTool.NONE); pendingSigWidget = null; pickSignature.launch(SignaturesActivity.intent(this, pick = true)) }
         }
         toolButton(bar, "Edit PDF", R.drawable.ic_edit_doc, beta = true) { enterBeta() }
+        toolButton(bar, "Quick fill", R.drawable.ic_idcard) { if (requireEditable()) { setTool(ActiveTool.NONE); quickFillSheet() } }
         toolButton(bar, "Text", R.drawable.ic_text) { if (requireEditable()) { setTool(ActiveTool.NONE); textDialog(null) } }
         toolButton(bar, "Draw", R.drawable.ic_draw, ActiveTool.PEN) { if (requireEditable()) setTool(ActiveTool.PEN) }
         toolButton(bar, "Highlight", R.drawable.ic_highlight, ActiveTool.HIGHLIGHT) { if (requireEditable()) setTool(ActiveTool.HIGHLIGHT) }
@@ -1754,7 +1758,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         dockDivider(bar)
         toolButton(bar, "Pages", R.drawable.ic_pages) { setTool(ActiveTool.NONE); openPages() }
         toolButton(bar, "Get text", R.drawable.ic_ocr) { setTool(ActiveTool.NONE); extractText() }
-        toolButton(bar, "Go to", R.drawable.ic_pdf) { goToPageDialog() }
+        toolButton(bar, "Go to", R.drawable.ic_pdf) { pagesSheet() }
         toolButton(bar, "Full screen", R.drawable.ic_fullscreen) { setFullscreen(true) }
         toolButton(bar, "Share", R.drawable.ic_share) { setTool(ActiveTool.NONE); shareCurrent() }
         toolButton(bar, "Print", R.drawable.ic_print) { setTool(ActiveTool.NONE); printCurrent() }
@@ -1772,7 +1776,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         if (!picking) doc.pickFocus = null
         if (betaMode) betaHint.text = when (t) {
             ActiveTool.BETA_IMAGE -> "Tap a picture to move, resize, replace or delete it"
-            ActiveTool.BLACKOUT -> "Drag over anything to black it out (hides it on the page; the text may still be copyable)"
+            ActiveTool.BLACKOUT -> "Drag over private details · on Save they're permanently removed (that page is saved as an image)"
             ActiveTool.WHITEOUT -> "Drag to erase an area"
             else -> "Tap any text to change it · dashed boxes show what can be edited"
         }
@@ -1801,7 +1805,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                 buildColors(PEN_COLORS)
             }
             ActiveTool.WHITEOUT -> toolTitle.text = "Whiteout — drag to cover text or marks"
-            ActiveTool.BLACKOUT -> toolTitle.text = "Black out — drag over text or pictures to hide them"
+            ActiveTool.BLACKOUT -> toolTitle.text = "Black out — permanently removed when you save"
             ActiveTool.NONE, ActiveTool.BETA_TEXT, ActiveTool.BETA_IMAGE -> {}
         }
         widthLabel.text = "Size ${"%.1f".format(toolWidth.value)}"
@@ -1814,7 +1818,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         val prefs = getSharedPreferences("tools", MODE_PRIVATE).edit()
         doc.tool = when (active) {
             ActiveTool.NONE, ActiveTool.BETA_TEXT, ActiveTool.BETA_IMAGE -> PdfDocView.Tool.None
-            ActiveTool.BLACKOUT -> PdfDocView.Tool.Shape(ShapeKind.FILL, Color.BLACK, 1f)
+            ActiveTool.BLACKOUT -> PdfDocView.Tool.Shape(ShapeKind.REDACT, Color.BLACK, 1f)
             ActiveTool.PEN -> { prefs.putInt("pen_color", toolColor).putFloat("pen_width", w); PdfDocView.Tool.Pen(toolColor, w, 1f) }
             ActiveTool.HIGHLIGHT -> { prefs.putInt("hl_color", toolColor).putFloat("hl_width", w); PdfDocView.Tool.Pen(toolColor, w, 0.35f) }
             ActiveTool.SHAPE -> {
@@ -1910,6 +1914,180 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     }
 
     // ---------------- navigation ----------------
+
+    /** Fill & sign: tap a saved detail, today's date or a mark to place it on the page. */
+    private fun quickFillSheet() {
+        val d = resources.displayMetrics.density
+        val details = MyDetails.load(this)
+        val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding((16 * d).toInt(), (10 * d).toInt(), (16 * d).toInt(), (20 * d).toInt()) }
+        fun title(s: String) = TextView(this).apply {
+            text = s; textSize = 13f; setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setTextColor(androidx.core.content.ContextCompat.getColor(this@PdfEditorActivity, R.color.md_on_surface_variant))
+            setPadding(0, (12 * d).toInt(), 0, (4 * d).toInt())
+        }
+        fun group(values: List<Pair<String, String>>): View {
+            val g = com.google.android.material.chip.ChipGroup(this)
+            for ((label, value) in values) g.addView(Chip(this).apply {
+                text = label
+                setOnClickListener { sheet.dismiss(); placeDetail(value) }
+            })
+            return g
+        }
+        root.addView(TextView(this).apply { text = "Quick fill"; textSize = 20f; setTypeface(typeface, android.graphics.Typeface.BOLD) })
+        root.addView(TextView(this).apply {
+            text = "Tap to place it on the page, then drag it into position."
+            textSize = 13f
+            setTextColor(androidx.core.content.ContextCompat.getColor(this@PdfEditorActivity, R.color.md_on_surface_variant))
+        })
+        val mine = MyDetails.FIELDS.mapNotNull { (k, label) -> details[k]?.takeIf { it.isNotBlank() }?.let { v -> Pair(if (k == "initials") v else v.lines().first().take(28), v) } }
+        root.addView(title("MY DETAILS"))
+        if (mine.isEmpty()) root.addView(TextView(this).apply { text = "Nothing saved yet — add your name, initials, phone… once and use them on every PDF."; textSize = 13f })
+        else root.addView(group(mine))
+        root.addView(MaterialButton(this).apply {
+            text = if (mine.isEmpty()) "Add my details" else "Edit my details"
+            setIconResource(R.drawable.ic_draw)
+            setOnClickListener { sheet.dismiss(); editMyDetails() }
+        })
+        val now = Date()
+        root.addView(title("DATE"))
+        root.addView(group(listOf("dd.MM.yyyy", "dd/MM/yyyy", "dd MMM yyyy", "MMMM d, yyyy").map { f ->
+            SimpleDateFormat(f, Locale.getDefault()).format(now).let { Pair(it, it) }
+        }))
+        root.addView(title("MARKS"))
+        root.addView(group(listOf("✓" to "✓", "✗" to "✗", "●" to "●", "N/A" to "N/A")))
+        sheet.setContentView(android.widget.ScrollView(this).apply { addView(root) })
+        sheet.behavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED
+        sheet.behavior.skipCollapsed = true
+        sheet.show()
+    }
+
+    /** Places a detail as text in the user's usual text style. */
+    private fun placeDetail(value: String) {
+        val prefs = getSharedPreferences("text", MODE_PRIVATE)
+        val font = runCatching { TextFont.valueOf(prefs.getString("font", "SANS")!!) }.getOrDefault(TextFont.SANS)
+        val size = if (value.length <= 2) prefs.getFloat("size", 14f) * 1.3f else prefs.getFloat("size", 14f)
+        addText(value, prefs.getInt("color", COLORS[1]), size, prefs.getBoolean("bold", false), font)
+    }
+
+    private fun editMyDetails() {
+        val d = resources.displayMetrics.density
+        val current = MyDetails.load(this)
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val inputs = LinkedHashMap<String, EditText>()
+        for ((k, label) in MyDetails.FIELDS) {
+            box.addView(TextView(this).apply {
+                text = label; textSize = 12f
+                setTextColor(androidx.core.content.ContextCompat.getColor(this@PdfEditorActivity, R.color.md_on_surface_variant))
+                setPadding(0, (10 * d).toInt(), 0, 0)
+            })
+            val e = EditText(this).apply {
+                setText(current[k] ?: "")
+                hint = label
+                inputType = when (k) {
+                    "email" -> android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+                    "phone" -> android.text.InputType.TYPE_CLASS_PHONE
+                    "address", "other" -> android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS
+                    "initials" -> android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
+                    else -> android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS
+                }
+            }
+            box.addView(e, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            inputs[k] = e
+        }
+        box.addView(TextView(this).apply {
+            text = "Saved only on this phone."
+            textSize = 12f
+            setPadding(0, (8 * d).toInt(), 0, 0)
+        })
+        MaterialAlertDialogBuilder(this)
+            .setTitle("My details")
+            .setView(android.widget.ScrollView(this).apply { addView(padded(box)) })
+            .setPositiveButton("Save") { _, _ ->
+                MyDetails.save(this, inputs.mapValues { it.value.text.toString() })
+                quickFillSheet()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /** Grid of page previews: tap one to jump there. */
+    private fun pagesSheet() {
+        val p = pdf ?: return
+        val r = renderer ?: return
+        val n = p.geoms.size
+        val d = resources.displayMetrics.density
+        val current = doc.currentPage()
+        val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding((12 * d).toInt(), (8 * d).toInt(), (12 * d).toInt(), 0) }
+        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
+        head.addView(TextView(this).apply {
+            text = "$n page${if (n == 1) "" else "s"}"
+            textSize = 18f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        head.addView(MaterialButton(this).apply {
+            text = "Go to number"
+            setOnClickListener { sheet.dismiss(); goToPageDialog() }
+        })
+        root.addView(head)
+
+        val cols = Ui.columns(this, 112, 3)
+        val thumbs = android.util.LruCache<Int, android.graphics.Bitmap>(60)
+        val thumbW = (((resources.displayMetrics.widthPixels - 24 * d) / cols) - 16 * d).toInt().coerceAtLeast(80)
+        val accent = androidx.core.content.ContextCompat.getColor(this, Themes.accent(this).primary)
+        val list = androidx.recyclerview.widget.RecyclerView(this)
+        list.layoutManager = androidx.recyclerview.widget.GridLayoutManager(this, cols)
+        class VH(v: View, val card: com.google.android.material.card.MaterialCardView, val img: android.widget.ImageView, val num: TextView) :
+            androidx.recyclerview.widget.RecyclerView.ViewHolder(v)
+        list.adapter = object : androidx.recyclerview.widget.RecyclerView.Adapter<VH>() {
+            override fun getItemCount() = n
+            override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): VH {
+                val box = LinearLayout(this@PdfEditorActivity).apply {
+                    orientation = LinearLayout.VERTICAL; gravity = android.view.Gravity.CENTER_HORIZONTAL
+                    setPadding((6 * d).toInt(), (6 * d).toInt(), (6 * d).toInt(), (6 * d).toInt())
+                }
+                val card = com.google.android.material.card.MaterialCardView(this@PdfEditorActivity).apply {
+                    radius = 8 * d; cardElevation = 2 * d; strokeWidth = 0
+                }
+                val img = android.widget.ImageView(this@PdfEditorActivity).apply {
+                    scaleType = android.widget.ImageView.ScaleType.FIT_CENTER; setBackgroundColor(Color.WHITE)
+                }
+                card.addView(img, android.widget.FrameLayout.LayoutParams(thumbW, (thumbW * 1.41f).toInt()))
+                box.addView(card)
+                val num = TextView(this@PdfEditorActivity).apply { textSize = 12f; gravity = android.view.Gravity.CENTER; setPadding(0, (4 * d).toInt(), 0, 0) }
+                box.addView(num)
+                return VH(box, card, img, num)
+            }
+            override fun onBindViewHolder(h: VH, pos: Int) {
+                val g = p.geoms[pos]
+                h.img.layoutParams = h.img.layoutParams.apply { height = (thumbW * g.dispH / g.dispW).toInt().coerceIn(40, thumbW * 2) }
+                h.num.text = "${pos + 1}"
+                val isCur = pos == current
+                h.card.strokeWidth = if (isCur) (2.5f * d).toInt() else 0
+                h.card.strokeColor = accent
+                h.num.setTextColor(if (isCur) accent else androidx.core.content.ContextCompat.getColor(this@PdfEditorActivity, R.color.md_on_surface_variant))
+                h.num.setTypeface(null, if (isCur) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+                h.img.tag = pos
+                val cached = thumbs.get(pos)
+                if (cached != null) h.img.setImageBitmap(cached) else {
+                    h.img.setImageDrawable(null)
+                    r.renderPage(pos, thumbW.coerceAtMost(360), stillWanted = { h.img.tag == pos && sheet.isShowing }) { bmp ->
+                        if (bmp == null) return@renderPage
+                        thumbs.put(pos, bmp)
+                        if (h.img.tag == pos) h.img.setImageBitmap(bmp)
+                    }
+                }
+                h.itemView.setOnClickListener { sheet.dismiss(); doc.goToPage(pos) }
+            }
+        }
+        root.addView(list, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (resources.displayMetrics.heightPixels * 0.7f).toInt()))
+        sheet.setContentView(root)
+        sheet.behavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED
+        sheet.behavior.skipCollapsed = true
+        sheet.show()
+        list.scrollToPosition(current)
+    }
 
     private fun goToPageDialog() {
         val n = doc.pageCount

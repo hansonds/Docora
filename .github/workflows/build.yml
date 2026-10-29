@@ -27,6 +27,24 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
+      - name: Use the private signing key (GitHub Secrets)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/docora.jks"
+            echo "DOCORA_KEYSTORE=$RUNNER_TEMP/docora.jks" >> "$GITHUB_ENV"
+            echo "DOCORA_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "DOCORA_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
+            echo "DOCORA_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
+            echo "Signing with the key from GitHub Secrets"
+          else
+            echo "No signing secrets set: using the key in the repository"
+          fi
+
       - name: Build release APK and Play Store bundle
         run: gradle assembleRelease bundleRelease --no-daemon --stacktrace
 
