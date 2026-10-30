@@ -658,6 +658,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     }
 
     private fun clearBetaCaches() {
+        pageStrokes.clear()
         layouts.clear()
         layoutJobs.clear()
         pageBitmaps.clear()
@@ -742,10 +743,39 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     }
 
     /** Tap on original text: type over it right there on the page. */
+    /** Typical stroke thickness of body text per page (for spotting bold lines). */
+    private val pageStrokes = HashMap<Int, Float?>()
+
+    /** Bold / italic of a line: from its font, or from how its letters look on the page. */
+    private suspend fun detectStyle(lay: PageLayout, line: TextLine): Pair<Boolean, Boolean> {
+        val g = pdf?.geoms?.getOrNull(lay.page) ?: return Pair(line.bold, line.italic)
+        // sharp enough that the letters are at least ~24 px tall when measured
+        val width = (g.dispW * 24f / line.sizePt.coerceAtLeast(1f)).toInt().coerceIn(1400, 2400)
+        val bmp = pageBitmap(lay.page, width) ?: return Pair(line.bold, line.italic)
+        return withContext(Dispatchers.Default) {
+            fun colours(l: TextLine): Pair<Int, Int> {
+                val bg = BetaEdit.backgroundAround(bmp, BetaEdit.coverFor(l.rect, l.sizePt, g))
+                return Pair(bg, BetaEdit.inkInside(bmp, l.rect, bg))
+            }
+            val (bg, ink) = colours(line)
+            val st = BetaEdit.inkStyle(bmp, line.rect, bg, ink)
+            val body = if (pageStrokes.containsKey(lay.page)) pageStrokes[lay.page]
+            else BetaEdit.pageStroke(bmp, lay.lines) { colours(it) }.also { pageStrokes[lay.page] = it }
+            // bold = clearly thicker strokes than the page's normal text (tested: bold is 1.5–2× regular)
+            val inkBold = st != null && (if (body != null) st.stroke > body * 1.3f else st.stroke > 0.095f)
+            Pair(line.bold || inkBold, line.italic || st?.italic == true)
+        }
+    }
+
+    private var typingBold = false
+    private var typingItalic = false
+
     private fun startTyping(lay: PageLayout, line: TextLine) {
         commitEdit()
         lifecycleScope.launch {
-            val item = buildReplacement(lay.page, listOf(line), line.text, line.font, line.bold,
+            val (bold, italic) = detectStyle(lay, line)
+            typingBold = bold; typingItalic = italic
+            val item = buildReplacement(lay.page, listOf(line), line.text, line.font, bold, italic,
                 align = BetaEdit.lineAlign(lay, line, pdf!!.geoms[lay.page]))
             items.add(item)
             typingIsNew = true
@@ -980,7 +1010,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                 record()
             }
             typingIsNew && raw == typingOriginal && backup == null && item.font == typingLine?.font &&
-                item.bold == typingLine?.bold && item.italic == (typingLine?.italic ?: false) && item.color == typingInk && !typingWhole -> items.remove(item)
+                item.bold == typingBold && item.italic == typingItalic && item.color == typingInk && !typingWhole -> items.remove(item)
             else -> {
                 item.plain = raw
                 item.text = TextRender.wrap(item, raw, item.wrapPt)
