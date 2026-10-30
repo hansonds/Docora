@@ -50,21 +50,35 @@ object TextRender {
     /** Typeface to draw with, bold / italic to add on top, and whether it is the PDF's own font. */
     class Face(val face: Typeface, val fakeBold: Boolean, val fakeItalic: Boolean, val fromPdf: Boolean)
 
-    fun faceFor(item: TextItem): Face {
+    fun faceFor(item: TextItem): Face = faceFor(item, item.bold, item.italic)
+
+    fun faceFor(item: TextItem, bold: Boolean, italic: Boolean): Face {
         val orig = (item as? ReplacedText)?.origFont
         if (orig != null) {
             synchronized(pdfFaces) {
                 val fam = BetaEdit.familyKey(orig)
                 val same = pdfFaces.entries.filter { BetaEdit.familyKey(it.key) == fam }
-                same.firstOrNull { it.value.bold == item.bold && it.value.italic == item.italic }?.let { return Face(it.value.face, false, false, true) }
+                same.firstOrNull { it.value.bold == bold && it.value.italic == italic }?.let { return Face(it.value.face, false, false, true) }
                 val o = pdfFaces[orig]
-                if (o != null && (!o.bold || item.bold) && (!o.italic || item.italic))
-                    return Face(o.face, item.bold && !o.bold, item.italic && !o.italic, true)
-                same.firstOrNull { !it.value.bold && !it.value.italic }?.let { return Face(it.value.face, item.bold, item.italic, true) }
+                if (o != null && (!o.bold || bold) && (!o.italic || italic))
+                    return Face(o.face, bold && !o.bold, italic && !o.italic, true)
+                same.firstOrNull { !it.value.bold && !it.value.italic }?.let { return Face(it.value.face, bold, italic, true) }
             }
         }
         val fake = faked(item.font)
-        return Face(typeface(item.font, item.bold, item.italic), fake && item.bold, fake && item.italic, false)
+        return Face(typeface(item.font, bold, italic), fake && bold, fake && italic, false)
+    }
+
+    /** The style of the item as a whole, as [Style] bits. */
+    fun baseFlags(item: TextItem) = (if (item.bold) Style.BOLD else 0) or (if (item.italic) Style.ITALIC else 0)
+
+    /** Style bits for every character of [text] (the whole item's style, with marked parts on top). */
+    fun flagsOf(item: TextItem, text: String = item.text): IntArray {
+        val f = IntArray(text.length) { baseFlags(item) }
+        for (m in (item as? ReplacedText)?.marks ?: emptyList()) {
+            for (i in m.start.coerceAtLeast(0) until m.end.coerceAtMost(text.length)) f[i] = m.flags
+        }
+        return f
     }
 
     /** Letter size factor: a stand-in font is resized so its capitals match the original's height. */
@@ -113,8 +127,11 @@ object TextRender {
 
     fun lines(text: String): List<String> = text.split('\n').ifEmpty { listOf("") }
 
-    fun paint(item: TextItem, pxPerPt: Float): Paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
-        val f = faceFor(item)
+    fun paint(item: TextItem, pxPerPt: Float): Paint = paint(item, pxPerPt, baseFlags(item))
+
+    /** Paint for one style of an item (bold / italic from [flags]). */
+    fun paint(item: TextItem, pxPerPt: Float, flags: Int): Paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
+        val f = faceFor(item, flags and Style.BOLD != 0, flags and Style.ITALIC != 0)
         typeface = f.face
         isFakeBoldText = f.fakeBold
         textSkewX = if (f.fakeItalic) -0.22f else 0f
@@ -123,89 +140,144 @@ object TextRender {
         textScaleX = item.scaleX
     }
 
+    /** Measures text whose characters may have different styles (in points). */
+    private class Measurer(val item: TextItem) {
+        private val paints = HashMap<Int, Paint>()
+        fun paint(flags: Int) = paints.getOrPut(flags and (Style.BOLD or Style.ITALIC)) { paint(item, 1f, flags) }
+        fun width(text: String, flags: IntArray, from: Int, to: Int): Float {
+            var w = 0f
+            var i = from
+            while (i < to) {
+                var j = i + 1
+                while (j < to && flags[j] and 3 == flags[i] and 3) j++
+                w += paint(flags[i]).measureText(text, i, j)
+                i = j
+            }
+            return w
+        }
+    }
+
     /**
-     * Breaks [text] into lines no wider than [widthPt] (word by word; very long words are split),
-     * keeping the user's own line breaks.
+     * Breaks [text] into lines no wider than [widthPt] by turning spaces into line breaks. Every
+     * character stays in place (so styled parts stay on the right words); a word longer than a
+     * whole line is not split.
      */
+    fun wrapKeep(item: TextItem, text: String, widthPt: Float, firstIndent: Float = 0f, flags: IntArray = flagsOf(item, text)): String {
+        if (widthPt <= 0f) return text
+        val m = Measurer(item)
+        val limit = widthPt * 1.002f + 0.3f
+        val out = text.toCharArray()
+        var lineStart = 0
+        var lastSpace = -1
+        var firstLine = true
+        var i = 0
+        while (i <= text.length) {
+            val end = i == text.length || text[i] == '\n'
+            if (end || text[i] == ' ') {
+                val avail = limit - if (firstLine) firstIndent else 0f
+                // the line so far (up to this space) is too wide: break at the previous space
+                if (m.width(text, flags, lineStart, i) > avail && lastSpace > lineStart) {
+                    out[lastSpace] = '\n'
+                    lineStart = lastSpace + 1
+                    firstLine = false
+                    lastSpace = -1
+                    continue   // measure the same word again on the new line
+                }
+                if (end) { lineStart = i + 1; lastSpace = -1; firstLine = false } else lastSpace = i
+            }
+            i++
+        }
+        return String(out)
+    }
+
     /** Wraps replaced text at its line-break width, leaving room for the first-line indent. */
     fun wrapItem(item: ReplacedText, text: String): String {
         val w = if (item.breakPt > 0f) item.breakPt else item.wrapPt
-        if (item.indentPt <= 0f || w <= item.indentPt) return wrap(item, text, w)
-        // only the first line of the first paragraph is shorter (by the indent)
-        val paras = text.split('\n')
-        val words = paras[0].split(' ').filter { it.isNotEmpty() }
-        val firstLine = wrap(item, words.joinToString(" "), w - item.indentPt).split('\n')[0]
-        val used = firstLine.split(' ').count { it.isNotEmpty() }
-        val rest = words.drop(used).joinToString(" ")
-        val head = if (rest.isEmpty()) firstLine else firstLine + "\n" + wrap(item, rest, w)
-        return (listOf(head) + paras.drop(1).map { wrap(item, it, w) }).joinToString("\n")
+        return wrapKeep(item, text, w, item.indentPt.coerceAtMost(w * 0.6f))
     }
 
-    fun wrap(item: TextItem, text: String, widthPt: Float): String {
-        if (widthPt <= 0f) return text
-        val p = paint(item, 1f)
-        // tiny tolerance: text measured to exactly the original width must still fit
-        @Suppress("NAME_SHADOWING") val widthPt = widthPt * 1.002f + 0.3f
-        val out = ArrayList<String>()
-        for (para in text.split('\n')) {
-            var line = ""
-            for (word in para.split(' ')) {
-                val cand = if (line.isEmpty()) word else "$line $word"
-                if (p.measureText(cand) <= widthPt || line.isEmpty() && p.measureText(word) <= widthPt) { line = cand; continue }
-                if (line.isNotEmpty()) out.add(line)
-                // a word longer than the whole width: split it
-                var w = word
-                while (p.measureText(w) > widthPt && w.length > 1) {
-                    var n = w.length - 1
-                    while (n > 1 && p.measureText(w.substring(0, n)) > widthPt) n--
-                    out.add(w.substring(0, n)); w = w.substring(n)
-                }
-                line = w
-            }
-            out.add(line)
-        }
-        return out.joinToString("\n")
-    }
+    /** Older word-by-word wrapping, for text without styled parts (e.g. normal text boxes). */
+    fun wrap(item: TextItem, text: String, widthPt: Float): String = wrapKeep(item, text, widthPt)
 
     /** A piece of text placed on a line: [x] and [w] in points from the left of the text box. */
-    class Run(val text: String, val x: Float, val w: Float)
+    class Run(val text: String, val x: Float, val w: Float, val flags: Int = 0)
+
+    /** Offsets where each line of [text] starts. */
+    private fun lineStarts(text: String): List<Int> {
+        val s = arrayListOf(0)
+        text.forEachIndexed { i, c -> if (c == '\n') s.add(i + 1) }
+        return s
+    }
 
     /** Width of the box lines are aligned in (the original column for replaced text). */
     fun boxWidthPt(item: TextItem): Float {
-        val p = paint(item, 1f)
+        val m = Measurer(item)
+        val text = item.text
+        val flags = flagsOf(item)
         val indent = (item as? ReplacedText)?.indentPt ?: 0f
-        val widest = lines(item.text).mapIndexed { k, l -> p.measureText(l) + if (k == 0) indent else 0f }.maxOrNull() ?: 0f
+        val ls = lines(text)
+        val starts = lineStarts(text)
+        val widest = ls.indices.maxOfOrNull { k -> m.width(text, flags, starts[k], starts[k] + ls[k].length) + if (k == 0) indent else 0f } ?: 0f
         val wrap = (item as? ReplacedText)?.wrapPt ?: 0f
         return if (item.align != TextAlign.LEFT && wrap > 0f) kotlin.math.max(wrap, widest) else widest
     }
 
     /**
-     * Where every line (and, for justified text, every word) goes. Used for both the screen and
-     * the saved PDF, so they match exactly.
+     * Where every piece of text goes: each line is split into parts of one style (and, for
+     * justified text, into words). Used for both the screen and the saved PDF, so they match.
      */
     fun layout(item: TextItem): List<List<Run>> {
-        val p = paint(item, 1f)
-        val ls = lines(item.text)
+        val m = Measurer(item)
+        val text = item.text
+        val flags = flagsOf(item)
+        val ls = lines(text)
+        val starts = lineStarts(text)
         val fullBox = boxWidthPt(item)
         val indent = (item as? ReplacedText)?.indentPt ?: 0f
-        return ls.mapIndexed { k, line ->
-            val w = p.measureText(line)
-            // a paragraph's first line starts further in (left-aligned and justified text)
+
+        /** Pieces of one style between [from] and [to], starting at x. */
+        fun pieces(from: Int, to: Int, x0: Float): List<Run> {
+            val out = ArrayList<Run>()
+            var x = x0
+            var i = from
+            while (i < to) {
+                var j = i + 1
+                while (j < to && flags[j] == flags[i]) j++
+                val w = m.width(text, flags, i, j)
+                out.add(Run(text.substring(i, j), x, w, flags[i]))
+                x += w
+                i = j
+            }
+            return out
+        }
+
+        return ls.indices.map { k ->
+            val from = starts[k]
+            val to = from + ls[k].length
+            val line = ls[k]
+            val w = m.width(text, flags, from, to)
             val ind = if (k == 0 && (item.align == TextAlign.LEFT || item.align == TextAlign.JUSTIFY || item.align == TextAlign.JUSTIFY_ALL)) indent else 0f
             val box = fullBox - ind
             val justify = (item.align == TextAlign.JUSTIFY && k < ls.size - 1) || item.align == TextAlign.JUSTIFY_ALL
-            val words = line.split(' ').filter { it.isNotEmpty() }
+            // words of the line (start, end) for justified text
+            val words = ArrayList<Pair<Int, Int>>()
+            var ws = -1
+            for (i in from..to) {
+                val sp = i == to || text[i] == ' '
+                if (!sp && ws < 0) ws = i
+                if (sp && ws >= 0) { words.add(Pair(ws, i)); ws = -1 }
+            }
             when {
                 line.isEmpty() -> emptyList()
                 justify && words.size > 1 && box > w -> {
-                    val widths = words.map { p.measureText(it) }
+                    val widths = words.map { (a, b) -> m.width(text, flags, a, b) }
                     val gap = (box - widths.sum()) / (words.size - 1)
                     var x = ind
-                    words.mapIndexed { i, word -> Run(word, x, widths[i]).also { x += widths[i] + gap } }
+                    words.flatMapIndexed { i, (a, b) -> pieces(a, b, x).also { x += widths[i] + gap } }
                 }
-                item.align == TextAlign.CENTER -> listOf(Run(line, (fullBox - w) / 2f, w))
-                item.align == TextAlign.RIGHT -> listOf(Run(line, fullBox - w, w))
-                else -> listOf(Run(line, ind, w))
+                item.align == TextAlign.CENTER -> pieces(from, to, (fullBox - w) / 2f)
+                item.align == TextAlign.RIGHT -> pieces(from, to, fullBox - w)
+                else -> pieces(from, to, ind)
             }
         }
     }
@@ -222,9 +294,12 @@ object TextRender {
         return Pair(w, h)
     }
 
+    /** Underline position and thickness, as fractions of the font size below the baseline. */
+    const val UNDER_POS = 0.12f
+    const val UNDER_THICK = 0.06f
+
     /** Draws the text with its top-left at (left, top) in a canvas scaled by [pxPerPt]. */
     fun draw(canvas: Canvas, item: TextItem, left: Float, top: Float, pxPerPt: Float) {
-        val p = paint(item, pxPerPt)
         val size = item.sizePt * pxPerPt
         var l = left
         var t = top
@@ -241,9 +316,18 @@ object TextRender {
             l += PAD * size
             t += PAD * size
         }
+        val paints = HashMap<Int, Paint>()
+        val under = Paint().apply { color = item.color }
         layout(item).forEachIndexed { k, runs ->
             val base = t + size * (ASCENT + item.lineGap * k)
-            for (r in runs) canvas.drawText(r.text, l + r.x * pxPerPt, base, p)
+            for (r in runs) {
+                val p = paints.getOrPut(r.flags and 3) { paint(item, pxPerPt, r.flags) }
+                val x = l + r.x * pxPerPt
+                canvas.drawText(r.text, x, base, p)
+                if (r.flags and Style.UNDERLINE != 0) {
+                    canvas.drawRect(x, base + size * UNDER_POS, x + r.w * pxPerPt, base + size * (UNDER_POS + UNDER_THICK), under)
+                }
+            }
         }
     }
 }

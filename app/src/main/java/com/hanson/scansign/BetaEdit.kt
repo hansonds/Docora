@@ -46,7 +46,9 @@ class TextLine(
     val fontName: String? = null,
     val italic: Boolean = false,
     /** Height of capitals as a fraction of the font size (0 = unknown). */
-    val capHeight: Float = 0f
+    val capHeight: Float = 0f,
+    /** Bold / italic of every character (from its own font), or null if unknown (scans). */
+    val charFlags: IntArray? = null
 ) {
     val rect get() = RectF(xs.firstOrNull() ?: 0f, top, xe.lastOrNull() ?: 0f, bottom)
 }
@@ -134,12 +136,15 @@ object BetaEdit {
         if (glyphs.isEmpty()) return null
         val sb = StringBuilder()
         val xs = ArrayList<Float>(); val xe = ArrayList<Float>()
+        val flags = ArrayList<Int>()
         var lastRight = glyphs[0].l
         var pendingSpace = false
         for (gl in seg) {
             if (gl == null) { if (sb.isNotEmpty()) pendingSpace = true; continue }
-            if (pendingSpace) { sb.append(' '); xs.add(lastRight / w); xe.add(gl.l / w); pendingSpace = false }
-            sb.append(gl.ch); xs.add(gl.l / w); xe.add(gl.r / w)
+            val f = (if (isBold(gl.font)) Style.BOLD else 0) or (if (isItalic(gl.font) || gl.slanted) Style.ITALIC else 0)
+            // a space takes the style of the word before it
+            if (pendingSpace) { sb.append(' '); xs.add(lastRight / w); xe.add(gl.l / w); flags.add(flags.lastOrNull() ?: f); pendingSpace = false }
+            sb.append(gl.ch); xs.add(gl.l / w); xe.add(gl.r / w); flags.add(f)
             lastRight = gl.r
         }
         val size = median(glyphs.map { it.size }).coerceIn(3f, 300f)
@@ -152,7 +157,8 @@ object BetaEdit {
             // the style most of the line's letters use
             glyphs.count { isBold(it.font) } * 2 > glyphs.size, family(font), try { font?.name } catch (_: Throwable) { null },
             glyphs.count { isItalic(it.font) || it.slanted } * 2 > glyphs.size,
-            capHeightOf(font)
+            capHeightOf(font),
+            flags.toIntArray()
         )
     }
 
