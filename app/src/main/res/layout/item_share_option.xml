@@ -77,6 +77,19 @@
                 android:layout_marginTop="2dp"
                 android:textAppearance="@style/TextAppearance.Material3.BodySmall"
                 android:textColor="?attr/colorOnSurfaceVariant" />
+
+            <!-- new size compared with the original -->
+            <com.google.android.material.progressindicator.LinearProgressIndicator
+                android:id="@+id/sizeBar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:max="100"
+                android:visibility="gone"
+                app:indicatorColor="?attr/colorPrimary"
+                app:trackColor="?attr/colorSurfaceVariant"
+                app:trackCornerRadius="4dp"
+                app:trackThickness="6dp" />
         </LinearLayout>
 
         <LinearLayout

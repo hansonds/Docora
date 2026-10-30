@@ -49,10 +49,15 @@ enum class Quality(val label: String, val jpeg: Float, val maxSide: Int) {
 
 enum class Layout(val label: String) { NORMAL("One page per scan"), ID_CARD("ID card (2 sides on one page)") }
 
-enum class CompressLevel(val label: String, val jpeg: Float, val maxSide: Int) {
-    LIGHT("Light — best quality", 0.8f, 2400),
-    MEDIUM("Medium — recommended", 0.65f, 1700),
-    STRONG("Strong — smallest file", 0.5f, 1200)
+/**
+ * How hard to compress: picture quality (JPEG), largest picture side in pixels, and whether to drop
+ * hidden extras (page previews, editing metadata).
+ */
+enum class CompressLevel(val label: String, val jpeg: Float, val maxSide: Int, val strip: Boolean) {
+    LIGHT("Light — best quality", 0.78f, 2200, false),
+    MEDIUM("Balanced — recommended", 0.62f, 1600, true),
+    STRONG("Small", 0.46f, 1150, true),
+    MAX("Maximum — smallest possible", 0.34f, 850, true)
 }
 
 /** One page in an organised document: source page index (-1 = blank page) and extra rotation. */
@@ -323,12 +328,37 @@ object PdfTools {
             val done = HashMap<COSBase, PDImageXObject?>()
             val n = doc.numberOfPages
             for (i in 0 until n) {
-                compressResources(doc, doc.getPage(i).resources, done, level, 0)
+                val page = doc.getPage(i)
+                compressResources(doc, page.resources, done, level, 0)
+                if (level.strip) {
+                    // hidden extras nobody sees: page preview pictures and editing-program data
+                    page.cosObject.removeItem(COSName.THUMB)
+                    page.cosObject.removeItem(COSName.METADATA)
+                    page.cosObject.removeItem(COSName.getPDFName("PieceInfo"))
+                }
                 progress?.invoke(i + 1, n)
             }
+            if (level.strip) {
+                doc.documentCatalog.cosObject.removeItem(COSName.METADATA)
+                doc.documentCatalog.cosObject.removeItem(COSName.getPDFName("PieceInfo"))
+            }
+            packUncompressed(doc)
             doc.save(out)
         }
         return out.length() < src.length()
+    }
+
+    /** Packs page contents and other data that were stored without compression. */
+    private fun packUncompressed(doc: PDDocument) {
+        for (o in try { doc.document.objects } catch (_: Throwable) { return }) {
+            val s = try { o.`object` } catch (_: Throwable) { null } as? COSStream ?: continue
+            try {
+                if (s.getDictionaryObject(COSName.FILTER) != null) continue
+                val raw = s.createRawInputStream().use { it.readBytes() }
+                if (raw.size < 512) continue
+                s.createOutputStream(COSName.FLATE_DECODE).use { it.write(raw) }
+            } catch (_: Throwable) {}
+        }
     }
 
     private fun compressResources(doc: PDDocument, res: PDResources?, done: HashMap<COSBase, PDImageXObject?>, level: CompressLevel, depth: Int) {
@@ -344,10 +374,18 @@ object PdfTools {
                     }
                     done[key] = null
                     try {
-                        if (xo.isStencil || xo.bitsPerComponent == 1 || xo.cosObject.containsKey(COSName.SMASK)) continue
+                        // 1-bit scans and colour-key masks are already compact / would break as JPEG
+                        if (xo.isStencil || xo.bitsPerComponent == 1 || xo.cosObject.containsKey(COSName.MASK)) continue
                         if (xo.width.toLong() * xo.height < 250L * 250) continue
                         val oldLen = (xo.cosObject as COSStream).length
-                        val bmp = xo.image ?: continue
+                        val softMask = xo.cosObject.getDictionaryObject(COSName.SMASK)
+                        // read big pictures at reduced size straight away (saves memory and time)
+                        val sub = max(1, max(xo.width, xo.height) / level.maxSide)
+                        val bmp = when {
+                            softMask != null -> if (xo.width.toLong() * xo.height <= 12_000_000L) xo.opaqueImage else null
+                            sub > 1 -> xo.getImage(null, sub)
+                            else -> xo.image
+                        } ?: continue
                         val s = min(1f, level.maxSide.toFloat() / max(bmp.width, bmp.height))
                         val scaled = if (s < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * s).toInt().coerceAtLeast(1), (bmp.height * s).toInt().coerceAtLeast(1), true) else bmp
                         // JPEG has no transparency: flatten on white
@@ -357,6 +395,8 @@ object PdfTools {
                             }
                         } else scaled
                         val newImg = JPEGFactory.createFromImage(doc, opaque, level.jpeg)
+                        // pictures with see-through parts keep their original transparency mask
+                        if (softMask != null) newImg.cosObject.setItem(COSName.SMASK, softMask)
                         if (newImg.cosObject.length < oldLen * 0.9) {
                             res.put(name, newImg)
                             done[key] = newImg
