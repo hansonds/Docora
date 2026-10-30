@@ -30,6 +30,7 @@ object PdfSaver {
             applyForm(doc, pdf.fields)
 
             val images = HashMap<String, PDImageXObject>()
+            val fonts = HashMap<String, PDFont>()
             for ((pageIndex, pageItems) in items.groupBy { it.page }) {
                 if (pageIndex !in 0 until doc.numberOfPages) continue
                 val page = doc.getPage(pageIndex)
@@ -43,7 +44,7 @@ object PdfSaver {
                             }
                             is TextItem -> {
                                 if (item is ReplacedText) drawCover(cs, g, item.cover, item.coverColor)
-                                drawText(doc, cs, g, item, page)
+                                drawText(doc, cs, g, item, page, fonts)
                             }
                             is InkItem -> drawInk(cs, g, item)
                             is ShapeItem -> drawShape(cs, g, item)
@@ -290,7 +291,16 @@ object PdfSaver {
         }
     }
 
-    private fun pdfFont(item: TextItem): PDFont {
+    /** Docora's own font for this style (embedded, same letters as the screen); standard PDF fonts as a fallback. */
+    private fun pdfFont(doc: PDDocument, item: TextItem, cache: HashMap<String, PDFont>?): PDFont {
+        val file = TextRender.fontFile(item.font, item.bold, item.italic)
+        if (file != null && cache != null) {
+            cache[file]?.let { return it }
+            val loaded = try {
+                TextRender.openFont(file)?.use { com.tom_roush.pdfbox.pdmodel.font.PDType0Font.load(doc, it, true) }
+            } catch (_: Throwable) { null }
+            if (loaded != null) { cache[file] = loaded; return loaded }
+        }
         val b = item.bold; val i = item.italic
         return when (item.font) {
             TextFont.SANS -> when { b && i -> PDType1Font.HELVETICA_BOLD_OBLIQUE; b -> PDType1Font.HELVETICA_BOLD; i -> PDType1Font.HELVETICA_OBLIQUE; else -> PDType1Font.HELVETICA }
@@ -299,31 +309,52 @@ object PdfSaver {
         }
     }
 
+    /** A font to write with, plus bold / italic that has to be added (the font itself lacks it). */
+    private class FontChoice(val font: PDFont, val fakeBold: Boolean, val fakeItalic: Boolean)
+
+    /** True if [font] can draw every letter of [text] (embedded fonts often hold only the letters used). */
+    private fun hasAll(font: PDFont, text: String): Boolean = try {
+        if (font !is com.tom_roush.pdfbox.pdmodel.font.PDVectorFont) false
+        else TextRender.lines(text).all { line ->
+            if (line.isEmpty()) return@all true
+            val input = java.io.ByteArrayInputStream(font.encode(line))
+            var ok = true
+            while (ok && input.available() > 0) ok = (font as com.tom_roush.pdfbox.pdmodel.font.PDVectorFont).hasGlyph(font.readCode(input))
+            ok
+        }
+    } catch (_: Throwable) { false }
+
     /**
-     * The PDF's own font for replaced text, if the page has it and it contains every letter
-     * (embedded fonts usually hold only the letters the original text used).
+     * Replaced text keeps the PDF's own font: the same font, or its bold / italic version from the
+     * same family on this page, or the original letters made bold / slanted. Null = it can't draw
+     * the typed letters, use Docora's font.
      */
-    private fun originalFont(page: com.tom_roush.pdfbox.pdmodel.PDPage, item: TextItem): PDFont? {
+    private fun originalFont(page: com.tom_roush.pdfbox.pdmodel.PDPage, item: TextItem): FontChoice? {
         val name = (item as? ReplacedText)?.origFont ?: return null
         return try {
             val res = page.resources ?: return null
-            val font = res.fontNames.asSequence().mapNotNull { n -> try { res.getFont(n) } catch (_: Throwable) { null } }
-                .firstOrNull { it.name == name } ?: return null
-            if (font !is com.tom_roush.pdfbox.pdmodel.font.PDVectorFont) return null
-            for (line in TextRender.lines(item.text)) {
-                if (line.isEmpty()) continue
-                val input = java.io.ByteArrayInputStream(font.encode(line))
-                while (input.available() > 0) {
-                    if (!(font as com.tom_roush.pdfbox.pdmodel.font.PDVectorFont).hasGlyph(font.readCode(input))) return null
-                }
-            }
-            font
+            val all = res.fontNames.mapNotNull { n -> try { res.getFont(n) } catch (_: Throwable) { null } }
+            val orig = all.firstOrNull { it.name == name } ?: return null
+            val fam = BetaEdit.familyKey(name)
+            val family = all.filter { BetaEdit.familyKey(it.name) == fam }
+            val choices = ArrayList<FontChoice>()
+            family.filter { BetaEdit.fontBold(it) == item.bold && BetaEdit.fontItalic(it) == item.italic }
+                .sortedBy { if (it === orig) 0 else 1 }.forEach { choices.add(FontChoice(it, false, false)) }
+            val ob = BetaEdit.fontBold(orig); val oi = BetaEdit.fontItalic(orig)
+            if ((!ob || item.bold) && (!oi || item.italic)) choices.add(FontChoice(orig, item.bold && !ob, item.italic && !oi))
+            family.filter { !BetaEdit.fontBold(it) && !BetaEdit.fontItalic(it) }.forEach { choices.add(FontChoice(it, item.bold, item.italic)) }
+            choices.firstOrNull { hasAll(it.font, item.text) }
         } catch (_: Throwable) { null }
     }
 
-    private fun drawText(doc: PDDocument, cs: PDPageContentStream, g: PageGeom, item: TextItem, page: com.tom_roush.pdfbox.pdmodel.PDPage? = null) {
+    private fun drawText(
+        doc: PDDocument, cs: PDPageContentStream, g: PageGeom, item: TextItem,
+        page: com.tom_roush.pdfbox.pdmodel.PDPage? = null, fonts: HashMap<String, PDFont>? = null
+    ) {
         val own = page?.let { originalFont(it, item) }
-        val font = own ?: pdfFont(item)
+        val font = own?.font ?: pdfFont(doc, item, fonts)
+        val fakeBold = own?.fakeBold == true
+        val fakeItalic = own?.fakeItalic == true
         val lines = TextRender.lines(item.text)
         val encodable = try {
             lines.forEach { font.encode(it) }
@@ -373,14 +404,29 @@ object PdfSaver {
                 val o = T(left + run.x, baseV)
                 val ux = T(left + run.x + 1f, baseV)
                 val up = T(left + run.x, baseV - 1f)
+                // italic added by slanting the original letters
+                val lean = if (fakeItalic) 0.21f else 0f
+                cs.saveGraphicsState()
+                if (fakeBold) {
+                    // bold added by outlining the letters in the same colour
+                    cs.setStrokingColor(r, gr, b)
+                    cs.setLineWidth(size * 0.035f)
+                }
                 cs.beginText()
                 cs.setFont(font, size)
+                if (fakeBold) cs.setRenderingMode(com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode.FILL_STROKE)
                 if (kotlin.math.abs(scale - 100f) > 0.5f) cs.setHorizontalScaling(scale)
                 cs.setNonStrokingColor(r, gr, b)
-                cs.setTextMatrix(Matrix(ux.x - o.x, ux.y - o.y, up.x - o.x, up.y - o.y, o.x, o.y))
+                cs.setTextMatrix(Matrix(
+                    ux.x - o.x, ux.y - o.y,
+                    (up.x - o.x) + lean * (ux.x - o.x), (up.y - o.y) + lean * (ux.y - o.y),
+                    o.x, o.y
+                ))
                 cs.showText(run.text)
                 if (kotlin.math.abs(scale - 100f) > 0.5f) cs.setHorizontalScaling(100f)
+                if (fakeBold) cs.setRenderingMode(com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode.FILL)
                 cs.endText()
+                cs.restoreGraphicsState()
             }
         }
     }

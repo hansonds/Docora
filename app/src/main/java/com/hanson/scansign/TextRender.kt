@@ -16,25 +16,95 @@ object TextRender {
     /** Stamp frame line width, as a fraction of the font size. */
     const val FRAME = 0.12f
 
+    // Docora carries its own fonts (Liberation Sans / Serif) so bold and italic look the same on every
+    // phone — some phones (custom system fonts) ignore bold / italic requests — and the saved PDF
+    // uses exactly the same letters as the screen.
+    private var assets: android.content.res.AssetManager? = null
+    private val faces = HashMap<String, Typeface>()
+
+    private var cacheDir: java.io.File? = null
+
+    fun init(ctx: android.content.Context) { assets = ctx.applicationContext.assets; cacheDir = ctx.applicationContext.cacheDir }
+
+    /** The PDF's own fonts (for replaced text), by PDF font name, with their style. */
+    private class PdfFace(val face: Typeface, val bold: Boolean, val italic: Boolean)
+    private val pdfFaces = HashMap<String, PdfFace>()
+
+    fun hasPdfFace(name: String) = synchronized(pdfFaces) { pdfFaces.containsKey(name) }
+
+    fun registerPdfFace(name: String, bytes: ByteArray, bold: Boolean, italic: Boolean) {
+        val dir = java.io.File(cacheDir ?: return, "pdffonts").apply { mkdirs() }
+        val file = java.io.File(dir, "f_" + Integer.toHexString(name.hashCode()) + ".ttf")
+        try {
+            if (!file.exists()) file.writeBytes(bytes)
+            val face = Typeface.createFromFile(file)
+            synchronized(pdfFaces) { pdfFaces[name] = PdfFace(face, bold, italic) }
+        } catch (_: Throwable) {}
+    }
+
+    /**
+     * Font for drawing [item]: for text that replaced original words, the PDF's own font (or its
+     * bold / italic sibling, else the original made bold / slanted); otherwise Docora's fonts.
+     * Returns the typeface and whether bold / italic must be added on top.
+     */
+    fun faceFor(item: TextItem): Triple<Typeface, Boolean, Boolean> {
+        val orig = (item as? ReplacedText)?.origFont
+        if (orig != null) {
+            synchronized(pdfFaces) {
+                val fam = BetaEdit.familyKey(orig)
+                val same = pdfFaces.entries.filter { BetaEdit.familyKey(it.key) == fam }
+                same.firstOrNull { it.value.bold == item.bold && it.value.italic == item.italic }?.let { return Triple(it.value.face, false, false) }
+                val o = pdfFaces[orig]
+                if (o != null && (!o.bold || item.bold) && (!o.italic || item.italic))
+                    return Triple(o.face, item.bold && !o.bold, item.italic && !o.italic)
+                same.firstOrNull { !it.value.bold && !it.value.italic }?.let { return Triple(it.value.face, item.bold, item.italic) }
+            }
+        }
+        val fake = faked(item.font)
+        return Triple(typeface(item.font, item.bold, item.italic), fake && item.bold, fake && item.italic)
+    }
+
+    /** The bundled font file for this style (null = Mono, which uses the phone's font). */
+    fun fontFile(font: TextFont, bold: Boolean, italic: Boolean): String? {
+        val fam = when (font) { TextFont.SANS -> "Sans"; TextFont.SERIF -> "Serif"; TextFont.MONO -> return null }
+        val st = when { bold && italic -> "BoldItalic"; bold -> "Bold"; italic -> "Italic"; else -> "Regular" }
+        return "fonts/Liberation$fam-$st.ttf"
+    }
+
+    fun openFont(file: String): java.io.InputStream? = try { assets?.open(file) } catch (_: Throwable) { null }
+
+    /** True when bold / italic have to be drawn by thickening / slanting (no real font for it). */
+    private fun faked(font: TextFont) = fontFile(font, false, false) == null || assets == null
+
+    private fun systemFace(font: TextFont) = Typeface.create(when (font) {
+        TextFont.SANS -> Typeface.SANS_SERIF
+        TextFont.SERIF -> Typeface.SERIF
+        TextFont.MONO -> Typeface.MONOSPACE
+    }, Typeface.NORMAL)
+
     fun typeface(font: TextFont, bold: Boolean, italic: Boolean = false): Typeface {
-        val family = when (font) {
-            TextFont.SANS -> Typeface.SANS_SERIF
-            TextFont.SERIF -> Typeface.SERIF
-            TextFont.MONO -> Typeface.MONOSPACE
-        }
-        val style = when {
-            bold && italic -> Typeface.BOLD_ITALIC
-            bold -> Typeface.BOLD
-            italic -> Typeface.ITALIC
-            else -> Typeface.NORMAL
-        }
-        return Typeface.create(family, style)
+        val file = fontFile(font, bold, italic)
+        val a = assets
+        if (file == null || a == null) return systemFace(font)
+        return faces.getOrPut(file) { try { Typeface.createFromAsset(a, file) } catch (_: Throwable) { systemFace(font) } }
+    }
+
+    /** Puts the item's font on a text field (the typing box), including added bold / italic. */
+    fun applyTo(tv: android.widget.TextView, item: TextItem) {
+        val (face, fakeBold, fakeItalic) = faceFor(item)
+        tv.typeface = face
+        tv.paint.isFakeBoldText = fakeBold
+        tv.paint.textSkewX = if (fakeItalic) -0.22f else 0f
+        tv.invalidate()
     }
 
     fun lines(text: String): List<String> = text.split('\n').ifEmpty { listOf("") }
 
     fun paint(item: TextItem, pxPerPt: Float): Paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
-        typeface = typeface(item.font, item.bold, item.italic)
+        val (face, fakeBold, fakeItalic) = faceFor(item)
+        typeface = face
+        isFakeBoldText = fakeBold
+        textSkewX = if (fakeItalic) -0.22f else 0f
         textSize = item.sizePt * pxPerPt
         color = item.color
         textScaleX = item.scaleX

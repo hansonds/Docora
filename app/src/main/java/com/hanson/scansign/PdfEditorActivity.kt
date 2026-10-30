@@ -837,7 +837,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     private fun styleTypeBox() {
         val item = typing ?: return
         val px = doc.pxPerPtOn(item.page)
-        typeBox.typeface = TextRender.typeface(item.font, item.bold, item.italic)
+        TextRender.applyTo(typeBox, item)
         typeBox.textScaleX = item.scaleX
         typeBox.setTextColor(item.color)
         typeBox.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, item.sizePt * px)
@@ -927,8 +927,9 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             item.origFont = null   // the user chose a style: don't switch back to the PDF's font when saving
             c.text = "Aa ${item.font.label}"; styleTypeBox()
         }
-        chip("Bold", item.bold) { item.bold = !item.bold; item.origFont = null; styleTypeBox() }
-        chip("Italic", item.italic) { item.italic = !item.italic; item.origFont = null; styleTypeBox() }
+        // bold / italic keep the PDF's own font (its bold / italic version, or the same letters made bold / slanted)
+        chip("Bold", item.bold) { item.bold = !item.bold; styleTypeBox() }
+        chip("Italic", item.italic) { item.italic = !item.italic; styleTypeBox() }
         chip("≡ ${item.align.label}") { c ->
             item.align = when (item.align) {
                 TextAlign.LEFT -> TextAlign.CENTER
@@ -1706,7 +1707,6 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                     existing.color = color
                     existing.sizePt = sizePt
                     existing.bold = bold.isChecked
-                    if (existing.italic != italic.isChecked && existing is ReplacedText) existing.origFont = null
                     existing.italic = italic.isChecked
                     existing.font = font
                     record()
