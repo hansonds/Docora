@@ -133,7 +133,17 @@ class ReplacedText(
     /** The PDF's own font: used when saving if it has every letter typed. */
     var origFont: String? = null
 ) : TextItem(page, text, color, sizePt, bold, font, fx, fy, false, 0f, lineGap, scaleX) {
+    /** Size factor so a stand-in font's capitals are as tall as the original's (1 = same). */
+    var glyphScale = 1f
+    /** Width (points) lines break at, so untouched lines break where they did (0 = [wrapPt]). */
+    var breakPt = 0f
+    /** First-line indent of a paragraph, in points. */
+    var indentPt = 0f
+
     override fun copy(): EditItem = ReplacedText(page, text, color, sizePt, bold, font, fx, fy, lineGap, RectF(cover), coverColor, scaleX, wrapPt, plain, origFont).also {
+        it.glyphScale = glyphScale
+        it.breakPt = breakPt
+        it.indentPt = indentPt
         it.rotation = rotation
         it.italic = italic
         it.align = align

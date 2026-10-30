@@ -395,11 +395,13 @@ object PdfSaver {
             left += TextRender.PAD * size
             top += TextRender.PAD * size
         }
+        // Docora's stand-in font is resized so its capitals match the original's height
+        val fontSize = if (own == null) size * ((item as? ReplacedText)?.glyphScale ?: 1f) else size
         // same line / word positions as the screen; each piece is stretched to exactly its on-screen width
         TextRender.layout(item).forEachIndexed { k, runs ->
             val baseV = top + size * (TextRender.ASCENT + item.lineGap * k)
             for (run in runs) {
-                val natural = try { font.getStringWidth(run.text) / 1000f * size } catch (_: Throwable) { 0f }
+                val natural = try { font.getStringWidth(run.text) / 1000f * fontSize } catch (_: Throwable) { 0f }
                 val scale = if (natural > 0f) (run.w / natural * 100f).coerceIn(60f, 160f) else 100f
                 val o = T(left + run.x, baseV)
                 val ux = T(left + run.x + 1f, baseV)
@@ -413,7 +415,7 @@ object PdfSaver {
                     cs.setLineWidth(size * 0.035f)
                 }
                 cs.beginText()
-                cs.setFont(font, size)
+                cs.setFont(font, fontSize)
                 if (fakeBold) cs.setRenderingMode(com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode.FILL_STROKE)
                 if (kotlin.math.abs(scale - 100f) > 0.5f) cs.setHorizontalScaling(scale)
                 cs.setNonStrokingColor(r, gr, b)

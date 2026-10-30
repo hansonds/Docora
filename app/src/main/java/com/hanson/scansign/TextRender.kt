@@ -47,22 +47,35 @@ object TextRender {
      * bold / italic sibling, else the original made bold / slanted); otherwise Docora's fonts.
      * Returns the typeface and whether bold / italic must be added on top.
      */
-    fun faceFor(item: TextItem): Triple<Typeface, Boolean, Boolean> {
+    /** Typeface to draw with, bold / italic to add on top, and whether it is the PDF's own font. */
+    class Face(val face: Typeface, val fakeBold: Boolean, val fakeItalic: Boolean, val fromPdf: Boolean)
+
+    fun faceFor(item: TextItem): Face {
         val orig = (item as? ReplacedText)?.origFont
         if (orig != null) {
             synchronized(pdfFaces) {
                 val fam = BetaEdit.familyKey(orig)
                 val same = pdfFaces.entries.filter { BetaEdit.familyKey(it.key) == fam }
-                same.firstOrNull { it.value.bold == item.bold && it.value.italic == item.italic }?.let { return Triple(it.value.face, false, false) }
+                same.firstOrNull { it.value.bold == item.bold && it.value.italic == item.italic }?.let { return Face(it.value.face, false, false, true) }
                 val o = pdfFaces[orig]
                 if (o != null && (!o.bold || item.bold) && (!o.italic || item.italic))
-                    return Triple(o.face, item.bold && !o.bold, item.italic && !o.italic)
-                same.firstOrNull { !it.value.bold && !it.value.italic }?.let { return Triple(it.value.face, item.bold, item.italic) }
+                    return Face(o.face, item.bold && !o.bold, item.italic && !o.italic, true)
+                same.firstOrNull { !it.value.bold && !it.value.italic }?.let { return Face(it.value.face, item.bold, item.italic, true) }
             }
         }
         val fake = faked(item.font)
-        return Triple(typeface(item.font, item.bold, item.italic), fake && item.bold, fake && item.italic)
+        return Face(typeface(item.font, item.bold, item.italic), fake && item.bold, fake && item.italic, false)
     }
+
+    /** Letter size factor: a stand-in font is resized so its capitals match the original's height. */
+    fun glyphScale(item: TextItem): Float {
+        val r = item as? ReplacedText ?: return 1f
+        if (r.glyphScale == 1f) return 1f
+        return if (faceFor(item).fromPdf) 1f else r.glyphScale
+    }
+
+    /** Capital height of Docora's fonts (fraction of the font size). */
+    fun standInCapHeight(font: TextFont) = when (font) { TextFont.SANS -> 0.688f; TextFont.SERIF -> 0.655f; TextFont.MONO -> 0.62f }
 
     /** The bundled font file for this style (null = Mono, which uses the phone's font). */
     fun fontFile(font: TextFont, bold: Boolean, italic: Boolean): String? {
@@ -91,21 +104,21 @@ object TextRender {
 
     /** Puts the item's font on a text field (the typing box), including added bold / italic. */
     fun applyTo(tv: android.widget.TextView, item: TextItem) {
-        val (face, fakeBold, fakeItalic) = faceFor(item)
-        tv.typeface = face
-        tv.paint.isFakeBoldText = fakeBold
-        tv.paint.textSkewX = if (fakeItalic) -0.22f else 0f
+        val f = faceFor(item)
+        tv.typeface = f.face
+        tv.paint.isFakeBoldText = f.fakeBold
+        tv.paint.textSkewX = if (f.fakeItalic) -0.22f else 0f
         tv.invalidate()
     }
 
     fun lines(text: String): List<String> = text.split('\n').ifEmpty { listOf("") }
 
     fun paint(item: TextItem, pxPerPt: Float): Paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
-        val (face, fakeBold, fakeItalic) = faceFor(item)
-        typeface = face
-        isFakeBoldText = fakeBold
-        textSkewX = if (fakeItalic) -0.22f else 0f
-        textSize = item.sizePt * pxPerPt
+        val f = faceFor(item)
+        typeface = f.face
+        isFakeBoldText = f.fakeBold
+        textSkewX = if (f.fakeItalic) -0.22f else 0f
+        textSize = item.sizePt * pxPerPt * (if (f.fromPdf) 1f else ((item as? ReplacedText)?.glyphScale ?: 1f))
         color = item.color
         textScaleX = item.scaleX
     }
@@ -114,6 +127,20 @@ object TextRender {
      * Breaks [text] into lines no wider than [widthPt] (word by word; very long words are split),
      * keeping the user's own line breaks.
      */
+    /** Wraps replaced text at its line-break width, leaving room for the first-line indent. */
+    fun wrapItem(item: ReplacedText, text: String): String {
+        val w = if (item.breakPt > 0f) item.breakPt else item.wrapPt
+        if (item.indentPt <= 0f || w <= item.indentPt) return wrap(item, text, w)
+        // only the first line of the first paragraph is shorter (by the indent)
+        val paras = text.split('\n')
+        val words = paras[0].split(' ').filter { it.isNotEmpty() }
+        val firstLine = wrap(item, words.joinToString(" "), w - item.indentPt).split('\n')[0]
+        val used = firstLine.split(' ').count { it.isNotEmpty() }
+        val rest = words.drop(used).joinToString(" ")
+        val head = if (rest.isEmpty()) firstLine else firstLine + "\n" + wrap(item, rest, w)
+        return (listOf(head) + paras.drop(1).map { wrap(item, it, w) }).joinToString("\n")
+    }
+
     fun wrap(item: TextItem, text: String, widthPt: Float): String {
         if (widthPt <= 0f) return text
         val p = paint(item, 1f)
@@ -146,7 +173,8 @@ object TextRender {
     /** Width of the box lines are aligned in (the original column for replaced text). */
     fun boxWidthPt(item: TextItem): Float {
         val p = paint(item, 1f)
-        val widest = lines(item.text).maxOf { p.measureText(it) }
+        val indent = (item as? ReplacedText)?.indentPt ?: 0f
+        val widest = lines(item.text).mapIndexed { k, l -> p.measureText(l) + if (k == 0) indent else 0f }.maxOrNull() ?: 0f
         val wrap = (item as? ReplacedText)?.wrapPt ?: 0f
         return if (item.align != TextAlign.LEFT && wrap > 0f) kotlin.math.max(wrap, widest) else widest
     }
@@ -158,9 +186,13 @@ object TextRender {
     fun layout(item: TextItem): List<List<Run>> {
         val p = paint(item, 1f)
         val ls = lines(item.text)
-        val box = boxWidthPt(item)
+        val fullBox = boxWidthPt(item)
+        val indent = (item as? ReplacedText)?.indentPt ?: 0f
         return ls.mapIndexed { k, line ->
             val w = p.measureText(line)
+            // a paragraph's first line starts further in (left-aligned and justified text)
+            val ind = if (k == 0 && (item.align == TextAlign.LEFT || item.align == TextAlign.JUSTIFY || item.align == TextAlign.JUSTIFY_ALL)) indent else 0f
+            val box = fullBox - ind
             val justify = (item.align == TextAlign.JUSTIFY && k < ls.size - 1) || item.align == TextAlign.JUSTIFY_ALL
             val words = line.split(' ').filter { it.isNotEmpty() }
             when {
@@ -168,12 +200,12 @@ object TextRender {
                 justify && words.size > 1 && box > w -> {
                     val widths = words.map { p.measureText(it) }
                     val gap = (box - widths.sum()) / (words.size - 1)
-                    var x = 0f
+                    var x = ind
                     words.mapIndexed { i, word -> Run(word, x, widths[i]).also { x += widths[i] + gap } }
                 }
-                item.align == TextAlign.CENTER -> listOf(Run(line, (box - w) / 2f, w))
-                item.align == TextAlign.RIGHT -> listOf(Run(line, box - w, w))
-                else -> listOf(Run(line, 0f, w))
+                item.align == TextAlign.CENTER -> listOf(Run(line, (fullBox - w) / 2f, w))
+                item.align == TextAlign.RIGHT -> listOf(Run(line, fullBox - w, w))
+                else -> listOf(Run(line, ind, w))
             }
         }
     }
