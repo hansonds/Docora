@@ -114,7 +114,9 @@ object BetaEdit {
             }
             makeLine(page, seg, w, h)?.let { lines.add(it) }
         }
-        shareFonts(rawLines.flatMap { l -> l.mapNotNull { it?.font } }.toSet())
+        val used = HashMap<PDFont, MutableSet<Char>>()
+        for (l in rawLines) for (gl in l) { val f = gl?.font ?: continue; used.getOrPut(f) { HashSet() }.add(gl.ch) }
+        shareFonts(used)
         val images = try { imageBoxes(doc, page, g) } catch (_: Throwable) { emptyList() }
         return PageLayout(page, lines, blocks(lines), images, scanned = false)
     }
@@ -163,20 +165,46 @@ object BetaEdit {
             .removeSuffix("bold").removeSuffix("italic").removeSuffix("oblique")
     }
 
-    /** Hands the PDF's own (embedded TrueType / OpenType) fonts to the screen, so typing shows them. */
-    private fun shareFonts(fonts: Collection<PDFont?>) {
-        for (f in fonts) {
-            f ?: continue
+    /** PDF fonts already checked for the screen (usable or not). */
+    private val checkedFonts = HashSet<String>()
+
+    /**
+     * Hands the PDF's own (embedded TrueType / OpenType) fonts to the screen, so typing shows them —
+     * but only fonts that can really draw the letters this page uses with them. Embedded fonts are
+     * often cut-down copies without a normal letter table; the phone would silently draw those in
+     * its regular font (losing bold / italic), so Docora's own font is used for them instead.
+     */
+    private fun shareFonts(used: Map<PDFont, Set<Char>>) {
+        for ((f, chars) in used) {
             val name = try { f.name } catch (_: Throwable) { null } ?: continue
-            if (TextRender.hasPdfFace(name)) continue
+            if (!synchronized(checkedFonts) { checkedFonts.add(name) }) continue
             try {
                 val d = f.fontDescriptor ?: continue
+                val openType = d.fontFile2 == null
                 val stream = d.fontFile2 ?: d.fontFile3?.takeIf {
                     it.cosObject.getNameAsString(COSName.SUBTYPE) == "OpenType"
                 } ?: continue
                 val bytes = stream.createInputStream().use { it.readBytes() }
+                if (!drawsLetters(bytes, openType, chars)) continue
                 TextRender.registerPdfFace(name, bytes, isBold(f), isItalic(f))
             } catch (_: Throwable) {}
+        }
+    }
+
+    /** True if the font file maps (almost) all [chars] to real letter shapes by their normal codes. */
+    private fun drawsLetters(bytes: ByteArray, openType: Boolean, chars: Set<Char>): Boolean {
+        val letters = chars.filter { !it.isWhitespace() }
+        if (letters.isEmpty()) return false
+        val ttf = try {
+            if (openType) com.tom_roush.fontbox.ttf.OTFParser(true).parse(java.io.ByteArrayInputStream(bytes))
+            else com.tom_roush.fontbox.ttf.TTFParser(true).parse(java.io.ByteArrayInputStream(bytes))
+        } catch (_: Throwable) { return false }
+        return try {
+            val cmap = ttf.getUnicodeCmapLookup(false) ?: return false
+            val found = letters.count { cmap.getGlyphId(it.code) > 0 }
+            found >= letters.size * 0.95f
+        } catch (_: Throwable) { false } finally {
+            try { ttf.close() } catch (_: Throwable) {}
         }
     }
 
