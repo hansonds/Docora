@@ -114,6 +114,7 @@ object BetaEdit {
             }
             makeLine(page, seg, w, h)?.let { lines.add(it) }
         }
+        shareFonts(rawLines.flatMap { l -> l.mapNotNull { it?.font } }.toSet())
         val images = try { imageBoxes(doc, page, g) } catch (_: Throwable) { emptyList() }
         return PageLayout(page, lines, blocks(lines), images, scanned = false)
     }
@@ -151,6 +152,33 @@ object BetaEdit {
     }
 
     private fun fontName(f: PDFont?) = (try { f?.name } catch (_: Throwable) { null } ?: "").lowercase()
+
+    fun fontBold(f: PDFont?) = isBold(f)
+    fun fontItalic(f: PDFont?) = isItalic(f)
+
+    /** Family of a PDF font name without subset tag and style words: "ABCDEF+Arial-BoldMT" -> "arial". */
+    fun familyKey(name: String?): String {
+        val n = (name ?: "").substringAfter('+').lowercase().split('-', ',').first()
+        return n.removeSuffix("psmt").removeSuffix("mt").removeSuffix("ps")
+            .removeSuffix("bold").removeSuffix("italic").removeSuffix("oblique")
+    }
+
+    /** Hands the PDF's own (embedded TrueType / OpenType) fonts to the screen, so typing shows them. */
+    private fun shareFonts(fonts: Collection<PDFont?>) {
+        for (f in fonts) {
+            f ?: continue
+            val name = try { f.name } catch (_: Throwable) { null } ?: continue
+            if (TextRender.hasPdfFace(name)) continue
+            try {
+                val d = f.fontDescriptor ?: continue
+                val stream = d.fontFile2 ?: d.fontFile3?.takeIf {
+                    it.cosObject.getNameAsString(COSName.SUBTYPE) == "OpenType"
+                } ?: continue
+                val bytes = stream.createInputStream().use { it.readBytes() }
+                TextRender.registerPdfFace(name, bytes, isBold(f), isItalic(f))
+            } catch (_: Throwable) {}
+        }
+    }
 
     private val boldCache = HashMap<PDFont, Boolean>()
     private val italicCache = HashMap<PDFont, Boolean>()

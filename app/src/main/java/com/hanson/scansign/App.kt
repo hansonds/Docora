@@ -10,6 +10,7 @@ class App : Application() {
         super.onCreate()
         CrashReport.install(this)
         Themes.init(this)
+        TextRender.init(this)
         PDFBoxResourceLoader.init(applicationContext)
         openCvReady = try {
             OpenCVLoader.initLocal()
