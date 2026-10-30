@@ -401,6 +401,67 @@ object BetaEdit {
         return Color.rgb(sr / n, sg / n, sb / n)
     }
 
+    // ------------------------------------------------------------------ bold / italic from the letters themselves
+
+    /** What the ink of one line looks like: stroke thickness (relative to the text size) and slant. */
+    class InkStyle(val stroke: Float, val italic: Boolean)
+
+    /**
+     * Measures a line on the rendered page: how thick the strokes are (bold) and whether the letters
+     * lean (italic). Works for scans and for PDFs whose fonts don't say what they are.
+     */
+    fun inkStyle(bmp: Bitmap, r: RectF, bg: Int, ink: Int): InkStyle? {
+        val w = bmp.width; val h = bmp.height
+        val l = (r.left * w).toInt().coerceIn(0, w - 1); val t = (r.top * h).toInt().coerceIn(0, h - 1)
+        val rr = (r.right * w).toInt().coerceIn(l + 1, w); val b = (r.bottom * h).toInt().coerceIn(t + 1, h)
+        val cw = rr - l; val ch = b - t
+        if (cw < 8 || ch < 6) return null
+        val px = IntArray(cw * ch)
+        bmp.getPixels(px, 0, cw, l, t, cw, ch)
+        fun lum(c: Int) = (Color.red(c) * 299 + Color.green(c) * 587 + Color.blue(c) * 114) / 1000
+        val mid = (lum(bg) + lum(ink)) / 2
+        val darkInk = lum(ink) < lum(bg)
+        val on = BooleanArray(px.size) { val v = lum(px[it]); if (darkInk) v < mid else v > mid }
+        // stroke thickness: typical length of the short horizontal ink runs (the stems of letters)
+        val runs = ArrayList<Int>()
+        for (y in 0 until ch) {
+            var run = 0
+            for (x in 0 until cw) {
+                if (on[y * cw + x]) run++ else { if (run > 0) runs.add(run); run = 0 }
+            }
+            if (run > 0) runs.add(run)
+        }
+        if (runs.size < 12) return null
+        runs.sort()
+        val stem = runs[runs.size * 2 / 5].toFloat()           // below the median: skips horizontal bars
+        val stroke = stem / ch
+        // slant: undo a lean of 0°…16° and see which makes the letters stand up straightest
+        val cy = ch / 2f
+        fun sharpness(s: Float): Double {
+            val cols = IntArray(cw + ch)
+            for (y in 0 until ch) {
+                val shift = Math.round(s * (y - cy)) + ch / 2
+                for (x in 0 until cw) if (on[y * cw + x]) { val c = x + shift; if (c in cols.indices) cols[c]++ }
+            }
+            var sum = 0.0
+            for (c in cols) sum += c.toDouble() * c
+            return sum
+        }
+        val upright = sharpness(0f)
+        val best = listOf(0.14f, 0.2f, 0.27f, 0.34f).maxOf { sharpness(it) }
+        val back = listOf(-0.14f, -0.2f).maxOf { sharpness(it) }
+        val italic = best > upright * 1.06 && best > back * 1.04
+        return InkStyle(stroke, italic)
+    }
+
+    /** Typical stroke thickness of the body text on a page (to tell bold lines apart). */
+    fun pageStroke(bmp: Bitmap, lines: List<TextLine>, inkOf: (TextLine) -> Pair<Int, Int>): Float? {
+        val sample = lines.filter { it.text.length >= 6 }.let { l -> if (l.size > 30) l.shuffled(java.util.Random(7)).take(30) else l }
+        val strokes = sample.mapNotNull { line -> val (bg, ink) = inkOf(line); inkStyle(bmp, line.rect, bg, ink)?.stroke }
+        if (strokes.size < 3) return null
+        return strokes.sorted()[strokes.size / 2]
+    }
+
     /** A piece of the rendered page as its own picture (to move or resize an existing image). */
     fun crop(bmp: Bitmap, r: RectF): Bitmap? {
         val l = (r.left * bmp.width).toInt().coerceIn(0, bmp.width - 1)
