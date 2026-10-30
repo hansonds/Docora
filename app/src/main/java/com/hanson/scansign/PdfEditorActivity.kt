@@ -696,7 +696,24 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     private var typingWhole = false
     private var typingOriginal = ""
     private var typingInk = Color.BLACK
-    private val typeBox: EditText by lazy { findViewById(R.id.typeBox) }
+    private val typeBox: EditText by lazy {
+        findViewById<EditText>(R.id.typeBox).also { box ->
+            // Bold / Italic / Underline also appear in the menu shown when words are selected
+            box.customSelectionActionModeCallback = object : android.view.ActionMode.Callback {
+                override fun onCreateActionMode(mode: android.view.ActionMode, menu: android.view.Menu): Boolean {
+                    menu.add(0, 9101, 0, "Bold"); menu.add(0, 9102, 1, "Italic"); menu.add(0, 9103, 2, "Underline")
+                    return true
+                }
+                override fun onPrepareActionMode(mode: android.view.ActionMode, menu: android.view.Menu) = false
+                override fun onActionItemClicked(mode: android.view.ActionMode, item: android.view.MenuItem): Boolean {
+                    val bit = when (item.itemId) { 9101 -> Style.BOLD; 9102 -> Style.ITALIC; 9103 -> Style.UNDERLINE; else -> return false }
+                    toggleStyle(bit)
+                    return true
+                }
+                override fun onDestroyActionMode(mode: android.view.ActionMode) {}
+            }
+        }
+    }
     /** Moves the typing box so its first baseline matches the saved text's baseline. */
     private var typeBaselineShift = 0f
 
@@ -765,15 +782,42 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     }
 
     /** Paragraph lines joined into running text (a hyphen at a line end joins the word). */
-    private fun joinLines(lines: List<TextLine>): String {
+    private fun joinLines(lines: List<TextLine>): String = joinLinesStyled(lines).first
+
+    /** Joined text plus the style of each character (null if unknown). */
+    private fun joinLinesStyled(lines: List<TextLine>): Pair<String, IntArray?> {
         val sb = StringBuilder()
+        val fl = ArrayList<Int>()
+        val known = lines.all { it.charFlags != null && it.charFlags.size == it.text.length }
         for (l in lines) {
+            val lead = l.text.length - l.text.trimStart().length
             val s = l.text.trim()
-            if (sb.isEmpty()) sb.append(s)
-            else if (sb.endsWith("-")) { sb.setLength(sb.length - 1); sb.append(s) }
-            else sb.append(' ').append(s)
+            val f = if (known) l.charFlags!!.copyOfRange(lead, lead + s.length).toList() else List(s.length) { 0 }
+            if (sb.isEmpty()) { sb.append(s); fl.addAll(f) }
+            else if (sb.endsWith("-")) { sb.setLength(sb.length - 1); fl.removeAt(fl.size - 1); sb.append(s); fl.addAll(f) }
+            else { sb.append(' ').append(s); fl.add(fl.lastOrNull() ?: 0); fl.addAll(f) }
         }
-        return sb.toString()
+        return Pair(sb.toString(), if (known) fl.toIntArray() else null)
+    }
+
+    /** Style marks for the characters whose style differs from the text as a whole. */
+    private fun marksFrom(flags: IntArray, base: Int): List<StyleMark> {
+        val out = ArrayList<StyleMark>()
+        var i = 0
+        while (i < flags.size) {
+            if (flags[i] == base) { i++; continue }
+            var j = i + 1
+            while (j < flags.size && flags[j] == flags[i]) j++
+            out.add(StyleMark(i, j, flags[i]))
+            i = j
+        }
+        return out
+    }
+
+    /** Keeps a line's own mix of styles (e.g. one bold word) when it isn't all the same. */
+    private fun originalMarks(item: ReplacedText, flags: IntArray?): List<StyleMark> {
+        if (flags == null || flags.isEmpty() || flags.all { it == flags[0] }) return emptyList()
+        return marksFrom(flags, TextRender.baseFlags(item))
     }
 
     /** Tap on original text: type over it right there on the page. */
@@ -811,6 +855,8 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             typingBold = bold; typingItalic = italic
             val item = buildReplacement(lay.page, listOf(line), line.text, line.font, bold, italic,
                 align = BetaEdit.lineAlign(lay, line, pdf!!.geoms[lay.page]), context = lay.lines)
+            item.marks = originalMarks(item, line.charFlags)
+            typingMarks = item.marks.joinToString { "${it.start}-${it.end}-${it.flags}" }
             items.add(item)
             typingIsNew = true
             typingBackup = null
@@ -830,6 +876,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         typingLay = null; typingLine = null; typingWhole = false
         typingOriginal = item.plain
         typingInk = item.color
+        typingMarks = item.marks.joinToString { "${it.start}-${it.end}-${it.flags}" }
         showTyping(item)
     }
 
@@ -845,6 +892,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         undoBox.visibility = View.INVISIBLE
         buildTypeTools()
         typeBox.setText(item.plain)
+        applyMarks(item)
         styleTypeBox()
         typeBox.visibility = View.VISIBLE
         typeHandle.visibility = View.VISIBLE
@@ -972,8 +1020,10 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             c.text = "Aa ${item.font.label}"; styleTypeBox()
         }
         // bold / italic keep the PDF's own font (its bold / italic version, or the same letters made bold / slanted)
-        chip("Bold", item.bold) { item.bold = !item.bold; styleTypeBox() }
-        chip("Italic", item.italic) { item.italic = !item.italic; styleTypeBox() }
+        // with words selected these style just them; with nothing selected, the whole text
+        chip("B  Bold") { toggleStyle(Style.BOLD) }
+        chip("I  Italic") { toggleStyle(Style.ITALIC) }
+        chip("U  Underline") { toggleStyle(Style.UNDERLINE) }
         chip("≡ ${item.align.label}") { c ->
             item.align = when (item.align) {
                 TextAlign.LEFT -> TextAlign.CENTER
@@ -1007,10 +1057,12 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         val old = typing ?: return
         lifecycleScope.launch {
             val lines = if (whole) lay.blockOf(line).lines else listOf(line)
-            val text = if (whole) joinLines(lines) else line.text
+            val (text, flags) = if (whole) joinLinesStyled(lines) else Pair(line.text, line.charFlags)
             val g = pdf!!.geoms[lay.page]
             val item = buildReplacement(lay.page, lines, text, old.font, old.bold, old.italic,
                 if (whole) BetaEdit.blockAlign(lines, g) else BetaEdit.lineAlign(lay, line, g), lay.lines)
+            item.marks = originalMarks(item, flags)
+            typingMarks = item.marks.joinToString { "${it.start}-${it.end}-${it.flags}" }
             val i = items.indexOf(old)
             if (i >= 0) items[i] = item else items.add(item)
             typingWhole = whole
@@ -1018,11 +1070,75 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             typing = item
             doc.typingItem = item
             typeBox.setText(text)
+            applyMarks(item)
             typeBox.setSelection(typeBox.text.length)
             styleTypeBox()
             positionTyping()
             buildTypeTools()
         }
+    }
+
+    /** The marks the text started with (to tell whether anything changed). */
+    private var typingMarks = ""
+
+    /** Shows bold / italic / underline of part of the text in the typing box, in the real fonts. */
+    private inner class PartStyle(val flags: Int) : android.text.style.MetricAffectingSpan() {
+        override fun updateMeasureState(tp: android.text.TextPaint) = apply(tp)
+        override fun updateDrawState(tp: android.text.TextPaint) = apply(tp)
+        private fun apply(tp: android.text.TextPaint) {
+            val item = typing ?: return
+            val f = TextRender.faceFor(item, flags and Style.BOLD != 0, flags and Style.ITALIC != 0)
+            tp.typeface = f.face
+            tp.isFakeBoldText = f.fakeBold
+            tp.textSkewX = if (f.fakeItalic) -0.22f else 0f
+            tp.textSize = item.sizePt * doc.pxPerPtOn(item.page) * (if (f.fromPdf) 1f else item.glyphScale)
+            tp.isUnderlineText = flags and Style.UNDERLINE != 0
+        }
+    }
+
+    /** Style of every character in the typing box right now. */
+    private fun currentFlags(item: ReplacedText): IntArray {
+        val ed = typeBox.text
+        val f = IntArray(ed.length) { TextRender.baseFlags(item) }
+        for (s in ed.getSpans(0, ed.length, PartStyle::class.java)) {
+            for (i in ed.getSpanStart(s).coerceAtLeast(0) until ed.getSpanEnd(s).coerceAtMost(ed.length)) f[i] = s.flags
+        }
+        return f
+    }
+
+    /** Puts per-character styles on the typing box (only where they differ from the whole text). */
+    private fun setFlags(item: ReplacedText, flags: IntArray) {
+        val ed = typeBox.text
+        ed.getSpans(0, ed.length, PartStyle::class.java).forEach { ed.removeSpan(it) }
+        for (m in marksFrom(flags, TextRender.baseFlags(item))) {
+            // typing at the end of a styled word continues that style
+            ed.setSpan(PartStyle(m.flags), m.start, m.end.coerceAtMost(ed.length), android.text.Spanned.SPAN_EXCLUSIVE_INCLUSIVE)
+        }
+        typeBox.requestLayout()
+        typeBox.invalidate()
+    }
+
+    private fun applyMarks(item: ReplacedText) = setFlags(item, TextRender.flagsOf(item, typeBox.text.toString()))
+
+    /** Bold / Italic / Underline: for the selected words, or the whole text when nothing is selected. */
+    private fun toggleStyle(bit: Int) {
+        val item = typing ?: return
+        val len = typeBox.text.length
+        val s = kotlin.math.min(typeBox.selectionStart, typeBox.selectionEnd).coerceIn(0, len)
+        val e = kotlin.math.max(typeBox.selectionStart, typeBox.selectionEnd).coerceIn(0, len)
+        val flags = currentFlags(item)
+        val range = if (s < e) s until e else 0 until len
+        val on = !range.all { flags[it] and bit != 0 }
+        for (i in range) flags[i] = if (on) flags[i] or bit else flags[i] and bit.inv()
+        if (s >= e) {
+            // whole text: bold / italic become the text's own style
+            if (bit == Style.BOLD) item.bold = on
+            if (bit == Style.ITALIC) item.italic = on
+        }
+        setFlags(item, flags)
+        styleTypeBox()
+        if (s < e) typeBox.setSelection(s, e)
+        else hintOnce("beta_part_style", "Tip: select words first to make just them bold, italic or underlined")
     }
 
     /** Ends typing: keeps the new words ([apply]) or puts things back. */
@@ -1040,6 +1156,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         undoBox.visibility = View.VISIBLE
         setTool(active)
         val raw = typeBox.text.toString().trimEnd()
+        val newMarks = marksFrom(currentFlags(item).copyOf(raw.length), TextRender.baseFlags(item))
         val backup = typingBackup
         when {
             !apply -> {
@@ -1055,8 +1172,10 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                 record()
             }
             typingIsNew && raw == typingOriginal && backup == null && item.font == typingLine?.font &&
-                item.bold == typingBold && item.italic == typingItalic && item.color == typingInk && !typingWhole -> items.remove(item)
+                item.bold == typingBold && item.italic == typingItalic && item.color == typingInk && !typingWhole &&
+                newMarks.joinToString { "${it.start}-${it.end}-${it.flags}" } == typingMarks -> items.remove(item)
             else -> {
+                item.marks = newMarks
                 item.plain = raw
                 item.text = TextRender.wrapItem(item, raw)
                 record()

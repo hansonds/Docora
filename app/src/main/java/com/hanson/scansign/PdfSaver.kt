@@ -292,8 +292,8 @@ object PdfSaver {
     }
 
     /** Docora's own font for this style (embedded, same letters as the screen); standard PDF fonts as a fallback. */
-    private fun pdfFont(doc: PDDocument, item: TextItem, cache: HashMap<String, PDFont>?): PDFont {
-        val file = TextRender.fontFile(item.font, item.bold, item.italic)
+    private fun pdfFont(doc: PDDocument, item: TextItem, cache: HashMap<String, PDFont>?, bold: Boolean = item.bold, italic: Boolean = item.italic): PDFont {
+        val file = TextRender.fontFile(item.font, bold, italic)
         if (file != null && cache != null) {
             cache[file]?.let { return it }
             val loaded = try {
@@ -301,7 +301,7 @@ object PdfSaver {
             } catch (_: Throwable) { null }
             if (loaded != null) { cache[file] = loaded; return loaded }
         }
-        val b = item.bold; val i = item.italic
+        val b = bold; val i = italic
         return when (item.font) {
             TextFont.SANS -> when { b && i -> PDType1Font.HELVETICA_BOLD_OBLIQUE; b -> PDType1Font.HELVETICA_BOLD; i -> PDType1Font.HELVETICA_OBLIQUE; else -> PDType1Font.HELVETICA }
             TextFont.SERIF -> when { b && i -> PDType1Font.TIMES_BOLD_ITALIC; b -> PDType1Font.TIMES_BOLD; i -> PDType1Font.TIMES_ITALIC; else -> PDType1Font.TIMES_ROMAN }
@@ -329,7 +329,10 @@ object PdfSaver {
      * same family on this page, or the original letters made bold / slanted. Null = it can't draw
      * the typed letters, use Docora's font.
      */
-    private fun originalFont(page: com.tom_roush.pdfbox.pdmodel.PDPage, item: TextItem): FontChoice? {
+    private fun originalFont(
+        page: com.tom_roush.pdfbox.pdmodel.PDPage, item: TextItem,
+        bold: Boolean = item.bold, italic: Boolean = item.italic, text: String = item.text
+    ): FontChoice? {
         val name = (item as? ReplacedText)?.origFont ?: return null
         return try {
             val res = page.resources ?: return null
@@ -338,12 +341,12 @@ object PdfSaver {
             val fam = BetaEdit.familyKey(name)
             val family = all.filter { BetaEdit.familyKey(it.name) == fam }
             val choices = ArrayList<FontChoice>()
-            family.filter { BetaEdit.fontBold(it) == item.bold && BetaEdit.fontItalic(it) == item.italic }
+            family.filter { BetaEdit.fontBold(it) == bold && BetaEdit.fontItalic(it) == italic }
                 .sortedBy { if (it === orig) 0 else 1 }.forEach { choices.add(FontChoice(it, false, false)) }
             val ob = BetaEdit.fontBold(orig); val oi = BetaEdit.fontItalic(orig)
-            if ((!ob || item.bold) && (!oi || item.italic)) choices.add(FontChoice(orig, item.bold && !ob, item.italic && !oi))
-            family.filter { !BetaEdit.fontBold(it) && !BetaEdit.fontItalic(it) }.forEach { choices.add(FontChoice(it, item.bold, item.italic)) }
-            choices.firstOrNull { hasAll(it.font, item.text) }
+            if ((!ob || bold) && (!oi || italic)) choices.add(FontChoice(orig, bold && !ob, italic && !oi))
+            family.filter { !BetaEdit.fontBold(it) && !BetaEdit.fontItalic(it) }.forEach { choices.add(FontChoice(it, bold, italic)) }
+            choices.firstOrNull { hasAll(it.font, text) }
         } catch (_: Throwable) { null }
     }
 
@@ -351,21 +354,22 @@ object PdfSaver {
         doc: PDDocument, cs: PDPageContentStream, g: PageGeom, item: TextItem,
         page: com.tom_roush.pdfbox.pdmodel.PDPage? = null, fonts: HashMap<String, PDFont>? = null
     ) {
-        val own = page?.let { originalFont(it, item) }
-        val font = own?.font ?: pdfFont(doc, item, fonts)
-        val fakeBold = own?.fakeBold == true
-        val fakeItalic = own?.fakeItalic == true
-        val lines = TextRender.lines(item.text)
-        val encodable = try {
-            lines.forEach { font.encode(it) }
-            true
-        } catch (e: Throwable) {
-            false
-        }
-        if (!encodable) {
-            // non-Latin text (e.g. Malayalam, Hindi): draw it as a sharp image instead
-            drawTextAsImage(doc, cs, g, item)
-            return
+        // one font per style used in the text (bold / italic parts can use the PDF's own bold / italic font)
+        class Pick(val font: PDFont, val fakeBold: Boolean, val fakeItalic: Boolean, val own: Boolean)
+        val layout = TextRender.layout(item)
+        val picks = HashMap<Int, Pick>()
+        for ((st, runs) in layout.flatten().groupBy { it.flags and 3 }) {
+            val b = st and Style.BOLD != 0; val i = st and Style.ITALIC != 0
+            val txt = runs.joinToString("") { it.text }
+            val own = page?.let { originalFont(it, item, b, i, txt) }
+            val font = own?.font ?: pdfFont(doc, item, fonts, b, i)
+            val encodable = try { font.encode(txt); true } catch (_: Throwable) { false }
+            if (!encodable) {
+                // non-Latin text (e.g. Malayalam, Hindi): draw it as a sharp image instead
+                drawTextAsImage(doc, cs, g, item)
+                return
+            }
+            picks[st] = Pick(font, own?.fakeBold == true, own?.fakeItalic == true, own != null)
         }
         val r = Color.red(item.color) / 255f
         val gr = Color.green(item.color) / 255f
@@ -396,27 +400,30 @@ object PdfSaver {
             top += TextRender.PAD * size
         }
         // Docora's stand-in font is resized so its capitals match the original's height
-        val fontSize = if (own == null) size * ((item as? ReplacedText)?.glyphScale ?: 1f) else size
+        val standIn = size * ((item as? ReplacedText)?.glyphScale ?: 1f)
         // same line / word positions as the screen; each piece is stretched to exactly its on-screen width
-        TextRender.layout(item).forEachIndexed { k, runs ->
+        layout.forEachIndexed { k, runs ->
             val baseV = top + size * (TextRender.ASCENT + item.lineGap * k)
             for (run in runs) {
+                val pick = picks[run.flags and 3] ?: continue
+                val font = pick.font
+                val fontSize = if (pick.own) size else standIn
                 val natural = try { font.getStringWidth(run.text) / 1000f * fontSize } catch (_: Throwable) { 0f }
                 val scale = if (natural > 0f) (run.w / natural * 100f).coerceIn(60f, 160f) else 100f
                 val o = T(left + run.x, baseV)
                 val ux = T(left + run.x + 1f, baseV)
                 val up = T(left + run.x, baseV - 1f)
                 // italic added by slanting the original letters
-                val lean = if (fakeItalic) 0.21f else 0f
+                val lean = if (pick.fakeItalic) 0.21f else 0f
                 cs.saveGraphicsState()
-                if (fakeBold) {
+                if (pick.fakeBold) {
                     // bold added by outlining the letters in the same colour
                     cs.setStrokingColor(r, gr, b)
                     cs.setLineWidth(size * 0.035f)
                 }
                 cs.beginText()
                 cs.setFont(font, fontSize)
-                if (fakeBold) cs.setRenderingMode(com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode.FILL_STROKE)
+                if (pick.fakeBold) cs.setRenderingMode(com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode.FILL_STROKE)
                 if (kotlin.math.abs(scale - 100f) > 0.5f) cs.setHorizontalScaling(scale)
                 cs.setNonStrokingColor(r, gr, b)
                 cs.setTextMatrix(Matrix(
@@ -426,8 +433,17 @@ object PdfSaver {
                 ))
                 cs.showText(run.text)
                 if (kotlin.math.abs(scale - 100f) > 0.5f) cs.setHorizontalScaling(100f)
-                if (fakeBold) cs.setRenderingMode(com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode.FILL)
+                if (pick.fakeBold) cs.setRenderingMode(com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode.FILL)
                 cs.endText()
+                if (run.flags and Style.UNDERLINE != 0) {
+                    // underline: a thin bar under this piece
+                    val y0 = baseV + size * TextRender.UNDER_POS
+                    val y1 = y0 + size * TextRender.UNDER_THICK
+                    val p1 = T(left + run.x, y0); val p2 = T(left + run.x + run.w, y0)
+                    val p3 = T(left + run.x + run.w, y1); val p4 = T(left + run.x, y1)
+                    cs.moveTo(p1.x, p1.y); cs.lineTo(p2.x, p2.y); cs.lineTo(p3.x, p3.y); cs.lineTo(p4.x, p4.y); cs.closePath()
+                    cs.fill()
+                }
                 cs.restoreGraphicsState()
             }
         }

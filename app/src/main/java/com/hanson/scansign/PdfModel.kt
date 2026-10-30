@@ -58,6 +58,12 @@ data class PageGeom(val llx: Float, val lly: Float, val w: Float, val h: Float, 
 
 enum class TextFont(val label: String) { SANS("Sans"), SERIF("Serif"), MONO("Mono") }
 
+/** Style bits for part of a text. */
+object Style { const val BOLD = 1; const val ITALIC = 2; const val UNDERLINE = 4 }
+
+/** Style of part of replaced text: characters [start, end) of its text get exactly [flags]. */
+class StyleMark(val start: Int, val end: Int, val flags: Int)
+
 /** How lines sit in their box. JUSTIFY stretches every line but the last; JUSTIFY_ALL stretches all. */
 enum class TextAlign(val label: String) { LEFT("Left"), CENTER("Centre"), RIGHT("Right"), JUSTIFY("Justify"), JUSTIFY_ALL("Justify") }
 
@@ -139,11 +145,14 @@ class ReplacedText(
     var breakPt = 0f
     /** First-line indent of a paragraph, in points. */
     var indentPt = 0f
+    /** Words or parts styled differently from the rest (bold / italic / underline). */
+    var marks: List<StyleMark> = emptyList()
 
     override fun copy(): EditItem = ReplacedText(page, text, color, sizePt, bold, font, fx, fy, lineGap, RectF(cover), coverColor, scaleX, wrapPt, plain, origFont).also {
         it.glyphScale = glyphScale
         it.breakPt = breakPt
         it.indentPt = indentPt
+        it.marks = marks
         it.rotation = rotation
         it.italic = italic
         it.align = align
