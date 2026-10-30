@@ -36,6 +36,7 @@ object ShareSheet {
         lateinit var size: TextView
         lateinit var saving: TextView
         lateinit var spinner: ProgressBar
+        lateinit var bar: com.google.android.material.progressindicator.LinearProgressIndicator
     }
 
     fun show(a: AppCompatActivity, file: File) = sizeSheet(a, file, file.name, "Share PDF", forCompress = false) { f ->
@@ -55,14 +56,15 @@ object ShareSheet {
         sheet.setContentView(view)
         sheet.behavior.state = BottomSheetBehavior.STATE_EXPANDED
         sheet.behavior.skipCollapsed = true
-        view.findViewById<TextView>(R.id.fileName).text = displayName
+        val original = file.length()
+        view.findViewById<TextView>(R.id.fileName).text = "$displayName  ·  ${Formatter.formatShortFileSize(a, original)}"
         view.findViewById<TextView>(R.id.sheetTitle).text = title
 
-        val original = file.length()
         val opts = if (forCompress) listOf(
             Option("Light", "Best quality · a little smaller", R.drawable.ic_compress, CompressLevel.LIGHT, false),
             Option("Balanced", "Great quality · much smaller", R.drawable.ic_compress, CompressLevel.MEDIUM, true),
-            Option("Smallest", "Smallest file · lower image quality", R.drawable.ic_compress, CompressLevel.STRONG, false)
+            Option("Small", "Good for email & WhatsApp", R.drawable.ic_compress, CompressLevel.STRONG, false),
+            Option("Maximum", "Smallest possible · for strict upload limits", R.drawable.ic_compress, CompressLevel.MAX, false)
         ) else listOf(
             Option("Original", "Best quality, unchanged", R.drawable.ic_file, null, false),
             Option("Compressed", "Great quality · WhatsApp & email", R.drawable.ic_compress, CompressLevel.MEDIUM, true),
@@ -99,12 +101,13 @@ object ShareSheet {
             o.size = row.findViewById(R.id.size)
             o.saving = row.findViewById(R.id.saving)
             o.spinner = row.findViewById(R.id.spinner)
+            o.bar = row.findViewById(R.id.sizeBar)
             row.findViewById<TextView>(R.id.title).text = o.title
             row.findViewById<TextView>(R.id.subtitle).text = o.sub
             row.findViewById<View>(R.id.badge).visibility = if (o.recommended) View.VISIBLE else View.GONE
             IconTiles.accentFeature(row.findViewById(R.id.iconBox), row.findViewById(R.id.icon), o.icon)
             row.findViewById<ImageView>(R.id.icon).apply {
-                val sc = when (o.level) { CompressLevel.MEDIUM -> 0.88f; CompressLevel.STRONG -> 0.76f; else -> 1f }
+                val sc = when (o.level) { CompressLevel.MEDIUM -> 0.88f; CompressLevel.STRONG -> 0.76f; CompressLevel.MAX -> 0.66f; else -> 1f }
                 scaleX = sc; scaleY = sc
             }
             if (o.level == null) {
@@ -139,6 +142,8 @@ object ShareSheet {
                     o.size.text = fmt(out.length())
                     val pct = ((1 - out.length().toDouble() / original) * 100).toInt().coerceIn(1, 99)
                     o.saving.text = "−$pct%"
+                    o.bar.visibility = View.VISIBLE
+                    o.bar.setProgressCompat((100 - pct).coerceAtLeast(2), true)
                 } else {
                     o.file = file
                     o.size.text = fmt(original)
@@ -155,6 +160,99 @@ object ShareSheet {
             sheet.dismiss()
             onPick(f)
         }
+        sheet.show()
+    }
+
+    /**
+     * "Compressed!" screen: how much smaller the file got, before / after bars, and what to do next.
+     */
+    fun compressedResult(a: AppCompatActivity, before: Long, out: File, exported: Boolean) {
+        val d = a.resources.displayMetrics.density
+        fun dp(v: Float) = (v * d).toInt()
+        fun fmt(b: Long) = Formatter.formatShortFileSize(a, b)
+        val after = out.length()
+        val pct = if (before > 0) ((1 - after.toDouble() / before) * 100).toInt().coerceIn(0, 99) else 0
+        val accent = ContextCompat.getColor(a, Themes.accent(a).primary)
+        val sheet = BottomSheetDialog(a)
+        val root = LinearLayout(a).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = android.view.Gravity.CENTER_HORIZONTAL
+            setPadding(dp(22f), dp(8f), dp(22f), dp(22f))
+        }
+        // big "−62%" circle
+        val circle = LinearLayout(a).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = android.view.Gravity.CENTER
+            background = android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+                intArrayOf(IconTiles.Hue.GREEN.top, IconTiles.Hue.TEAL.bottom)
+            ).apply { shape = android.graphics.drawable.GradientDrawable.OVAL }
+            elevation = 6 * d
+        }
+        circle.addView(TextView(a).apply {
+            text = "−$pct%"; textSize = 32f; setTextColor(android.graphics.Color.WHITE)
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        })
+        circle.addView(TextView(a).apply { text = "smaller"; textSize = 13f; setTextColor(android.graphics.Color.WHITE); alpha = 0.9f })
+        root.addView(circle, LinearLayout.LayoutParams(dp(132f), dp(132f)).apply { topMargin = dp(10f) })
+        root.addView(TextView(a).apply {
+            text = "Compressed!"; textSize = 22f; setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(0, dp(14f), 0, 0)
+        })
+        root.addView(TextView(a).apply {
+            text = "You saved ${fmt((before - after).coerceAtLeast(0))}"
+            textSize = 14f; setTextColor(ContextCompat.getColor(a, R.color.md_on_surface_variant))
+        })
+        // before / after bars
+        fun barRow(label: String, size: Long, frac: Float, color: Int) {
+            val row = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(12f), 0, 0) }
+            val top = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL }
+            top.addView(TextView(a).apply { text = label; textSize = 13f }, LinearLayout.LayoutParams(0, -2, 1f))
+            top.addView(TextView(a).apply { text = fmt(size); textSize = 13f; setTypeface(typeface, android.graphics.Typeface.BOLD) })
+            row.addView(top)
+            val track = android.widget.FrameLayout(a).apply {
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = 6 * d; setColor(ContextCompat.getColor(a, R.color.md_surface_variant))
+                }
+            }
+            val fill = View(a).apply {
+                background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = 6 * d; setColor(color) }
+            }
+            track.addView(fill, android.widget.FrameLayout.LayoutParams(0, -1))
+            track.post {
+                fill.layoutParams = fill.layoutParams.apply { width = (track.width * frac.coerceIn(0.02f, 1f)).toInt() }
+            }
+            row.addView(track, LinearLayout.LayoutParams(-1, dp(12f)).apply { topMargin = dp(6f) })
+            root.addView(row, LinearLayout.LayoutParams(-1, -2))
+        }
+        barRow("Before", before, 1f, android.graphics.Color.rgb(160, 168, 184))
+        barRow("After", after, if (before > 0) after.toFloat() / before else 1f, accent)
+        root.addView(TextView(a).apply {
+            text = out.name + if (exported) "\nSaved in the app and in Downloads › Docora" else "\nSaved in the app"
+            textSize = 12.5f; gravity = android.view.Gravity.CENTER
+            setTextColor(ContextCompat.getColor(a, R.color.md_on_surface_variant))
+            setPadding(0, dp(16f), 0, 0)
+        })
+        val buttons = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(16f), 0, 0) }
+        fun button(label: String, icon: Int, primary: Boolean, onClick: () -> Unit) {
+            val b = MaterialButton(a)
+            if (!primary) {
+                // softer second button: tinted background, accent text
+                b.backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(a, R.color.md_surface_variant))
+                b.setTextColor(accent)
+                b.iconTint = ColorStateList.valueOf(accent)
+            }
+            b.text = label
+            b.setIconResource(icon)
+            b.setOnClickListener { sheet.dismiss(); onClick() }
+            buttons.addView(b, LinearLayout.LayoutParams(0, dp(52f), 1f).apply { marginStart = dp(4f); marginEnd = dp(4f) })
+        }
+        button("Open", R.drawable.ic_pdf, false) { a.startActivity(PdfEditorActivity.intent(a, out)) }
+        button("Share", R.drawable.ic_share, true) { Storage.sharePdf(a, out) }
+        root.addView(buttons, LinearLayout.LayoutParams(-1, -2))
+        sheet.setContentView(root)
+        sheet.behavior.state = BottomSheetBehavior.STATE_EXPANDED
+        sheet.behavior.skipCollapsed = true
         sheet.show()
     }
 

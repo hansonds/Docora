@@ -18,6 +18,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import android.widget.Toast
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.slider.Slider
@@ -251,27 +252,22 @@ class ToolsActivity : BaseActivity() {
             .show()
     }
 
+    /** Shows every compression level with its real resulting size, then a "Compressed!" result. */
     private fun compress(input: Input) {
-        val levels = CompressLevel.values()
-        var choice = 1
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Compress PDF")
-            .setSingleChoiceItems(levels.map { it.label as CharSequence }.toTypedArray(), choice) { _, w -> choice = w }
-            .setPositiveButton("Compress") { _, _ ->
-                val before = input.file.length()
-                Ui.runJob(this, "Compressing", { p ->
-                    val out = Storage.uniquePdf(this, "${input.base}_compressed")
-                    val smaller = PdfTools.compress(input.file, out, levels[choice], p)
-                    Triple(out, smaller, Storage.exportToDownloads(this, out))
-                }) { (out, smaller, exported) ->
-                    val fmt = { b: Long -> android.text.format.Formatter.formatShortFileSize(this, b) }
-                    val extra = if (smaller) "\n\n${fmt(before)} → ${fmt(out.length())}"
-                    else "\n\nThis PDF has no large images, so it can't get much smaller."
-                    Ui.showSaved(this, out, exported, extra)
+        val before = input.file.length()
+        ShareSheet.compress(this, input.file, input.name) { compressed ->
+            lifecycleScope.launch {
+                val saved = withContext(Dispatchers.IO) {
+                    try {
+                        val out = Storage.uniquePdf(this@ToolsActivity, "${input.base}_compressed")
+                        compressed.copyTo(out, overwrite = true)
+                        Pair(out, Storage.exportToDownloads(this@ToolsActivity, out))
+                    } catch (e: Throwable) { null }
                 }
+                if (saved == null) Toast.makeText(this@ToolsActivity, "Couldn't save the compressed PDF", Toast.LENGTH_LONG).show()
+                else ShareSheet.compressedResult(this@ToolsActivity, before, saved.first, saved.second)
             }
-            .setNegativeButton("Cancel", null)
-            .show()
+        }
     }
 
     private fun toJpg(input: Input) {
