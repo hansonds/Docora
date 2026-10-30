@@ -44,7 +44,9 @@ class TextLine(
     val font: TextFont,
     /** Name of the PDF's own font (null for scanned text). */
     val fontName: String? = null,
-    val italic: Boolean = false
+    val italic: Boolean = false,
+    /** Height of capitals as a fraction of the font size (0 = unknown). */
+    val capHeight: Float = 0f
 ) {
     val rect get() = RectF(xs.firstOrNull() ?: 0f, top, xe.lastOrNull() ?: 0f, bottom)
 }
@@ -149,8 +151,18 @@ object BetaEdit {
             size,
             // the style most of the line's letters use
             glyphs.count { isBold(it.font) } * 2 > glyphs.size, family(font), try { font?.name } catch (_: Throwable) { null },
-            glyphs.count { isItalic(it.font) || it.slanted } * 2 > glyphs.size
+            glyphs.count { isItalic(it.font) || it.slanted } * 2 > glyphs.size,
+            capHeightOf(font)
         )
+    }
+
+    /** Capital height of a PDF font (fraction of the font size), from its description; 0 if unknown. */
+    private fun capHeightOf(f: PDFont?): Float {
+        val d = try { f?.fontDescriptor } catch (_: Throwable) { null } ?: return 0f
+        val cap = try { d.capHeight / 1000f } catch (_: Throwable) { 0f }
+        if (cap in 0.45f..0.85f) return cap
+        val x = try { d.xHeight / 1000f } catch (_: Throwable) { 0f }
+        return if (x in 0.35f..0.65f) x * 1.38f else 0f
     }
 
     private fun fontName(f: PDFont?) = (try { f?.name } catch (_: Throwable) { null } ?: "").lowercase()

@@ -697,12 +697,16 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     private var typingOriginal = ""
     private var typingInk = Color.BLACK
     private val typeBox: EditText by lazy { findViewById(R.id.typeBox) }
+    /** Moves the typing box so its first baseline matches the saved text's baseline. */
+    private var typeBaselineShift = 0f
 
     /** A replacement for [lines] that looks like the original: same place, size, ink, spacing and letter width. */
     private suspend fun buildReplacement(
         page: Int, lines: List<TextLine>, text: String, font: TextFont, bold: Boolean,
         italic: Boolean = lines.count { it.italic } * 2 > lines.size,
-        align: TextAlign = TextAlign.LEFT
+        align: TextAlign = TextAlign.LEFT,
+        /** Other text on the page (to know how far a single line may grow). */
+        context: List<TextLine> = emptyList()
     ): ReplacedText {
         val g = pdf!!.geoms[page]
         val bmp = pageBitmap(page, 1400)
@@ -713,21 +717,51 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         val ink = bmp?.let { BetaEdit.inkInside(it, area, bg) } ?: Color.BLACK
         val gap = if (lines.size > 1) ((lines.last().baseline - lines[0].baseline) / (lines.size - 1) * g.dispH / size).coerceIn(0.9f, 3f)
         else TextRender.LINE
+        // letter height: a stand-in font is resized so its capitals are as tall as the original's
+        val caps = lines.map { it.capHeight }.filter { it > 0f }.sorted()
+        val glyphScale = if (caps.isEmpty()) 1f else (caps[caps.size / 2] / TextRender.standInCapHeight(font)).coerceIn(0.8f, 1.2f)
         // letter width: make the stand-in font as wide as the original words
         val probe = TextItem(page, "", ink, size, bold, font, 0f, 0f, italic = italic)
         val p = TextRender.paint(probe, 1f)
         var natural = 0f; var actual = 0f
-        for (l in lines) {
+        // justified lines are stretched, so only their last line shows the natural width
+        val measured = if (align == TextAlign.JUSTIFY || align == TextAlign.JUSTIFY_ALL) listOf(lines.last()) else lines
+        for (l in measured.ifEmpty { lines }) {
             if (l.text.length < 3) continue
-            natural += p.measureText(l.text)
+            natural += p.measureText(l.text) * glyphScale
             actual += ((l.xe.last() - l.xs.first()) * g.dispW)
         }
         val scale = if (natural > 0f) (actual / natural).coerceIn(0.75f, 1.25f) else 1f
-        // left-aligned text gets a little room; centred / right / justified keep the exact original width
-        val wrapPt = if (align == TextAlign.LEFT) area.width() * g.dispW * 1.03f + size * 0.3f else area.width() * g.dispW
+        // first-line indent of a paragraph
+        val minLeft = area.left
+        val indentPt = if (lines.size > 1) ((lines[0].rect.left - lines.drop(1).minOf { it.rect.left }) * g.dispW)
+            .takeIf { it > size * 0.5f } ?: 0f else 0f
+        val columnPt = area.width() * g.dispW
+        val wrapPt: Float
+        var breakPt = 0f
+        if (lines.size > 1) {
+            // a paragraph keeps its column; lines break at the widest original line, so untouched lines stay put
+            wrapPt = columnPt
+            val sized = TextItem(page, "", ink, size, bold, font, 0f, 0f, scaleX = scale, italic = italic)
+            val sp = TextRender.paint(sized, 1f)
+            breakPt = lines.dropLast(1).mapIndexed { k, l -> sp.measureText(l.text.trim()) * glyphScale + if (k == 0) indentPt else 0f }
+                .maxOrNull()?.let { it * 1.004f + 0.3f }?.coerceAtMost(columnPt) ?: 0f
+        } else if (align == TextAlign.LEFT) {
+            // a single line may grow up to the next text on the same line, or the page's text margin
+            val line = lines[0]
+            val nextOnLine = context.filter {
+                it !== line && kotlin.math.abs(it.baseline - line.baseline) * g.dispH < size * 0.4f && it.rect.left > line.rect.right
+            }.minOfOrNull { it.rect.left }
+            val pageRight = context.maxOfOrNull { it.rect.right }?.takeIf { it > line.rect.right } ?: (line.rect.right + 0.05f).coerceAtMost(0.96f)
+            val limit = nextOnLine?.let { it - size * 0.6f / g.dispW } ?: pageRight
+            wrapPt = (kotlin.math.max(limit, line.rect.right) - minLeft) * g.dispW + size * 0.2f
+        } else wrapPt = columnPt
         val origFont = lines.mapNotNull { it.fontName }.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
-        return ReplacedText(page, text, ink, size, bold, font, area.left, lines[0].baseline - size * TextRender.ASCENT / g.dispH,
-            gap, cover, bg, scale, wrapPt, text, origFont).also { it.italic = italic; it.align = align }
+        return ReplacedText(page, text, ink, size, bold, font, minLeft, lines[0].baseline - size * TextRender.ASCENT / g.dispH,
+            gap, cover, bg, scale, wrapPt, text, origFont).also {
+            it.italic = italic; it.align = align
+            it.glyphScale = glyphScale; it.breakPt = breakPt; it.indentPt = indentPt
+        }
     }
 
     /** Paragraph lines joined into running text (a hyphen at a line end joins the word). */
@@ -776,7 +810,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             val (bold, italic) = detectStyle(lay, line)
             typingBold = bold; typingItalic = italic
             val item = buildReplacement(lay.page, listOf(line), line.text, line.font, bold, italic,
-                align = BetaEdit.lineAlign(lay, line, pdf!!.geoms[lay.page]))
+                align = BetaEdit.lineAlign(lay, line, pdf!!.geoms[lay.page]), context = lay.lines)
             items.add(item)
             typingIsNew = true
             typingBackup = null
@@ -840,7 +874,14 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         TextRender.applyTo(typeBox, item)
         typeBox.textScaleX = item.scaleX
         typeBox.setTextColor(item.color)
-        typeBox.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, item.sizePt * px)
+        typeBox.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, item.sizePt * px * TextRender.glyphScale(item))
+        // put the first line's baseline exactly where the saved text's baseline will be
+        typeBaselineShift = TextRender.ASCENT * item.sizePt * px + typeBox.paint.fontMetrics.ascent
+        // paragraph indent on the first line
+        val ed = typeBox.text
+        ed.getSpans(0, ed.length, android.text.style.LeadingMarginSpan.Standard::class.java).forEach { ed.removeSpan(it) }
+        if (item.indentPt > 0f) ed.setSpan(android.text.style.LeadingMarginSpan.Standard((item.indentPt * px).toInt(), 0),
+            0, ed.length, android.text.Spanned.SPAN_INCLUSIVE_INCLUSIVE)
         if (android.os.Build.VERSION.SDK_INT >= 28) typeBox.lineHeight = (item.lineGap * item.sizePt * px).toInt().coerceAtLeast(1)
         else typeBox.setLineSpacing(0f, item.lineGap / 1.17f)
         typeBox.gravity = android.view.Gravity.TOP or when (item.align) {
@@ -871,6 +912,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                         val maxW = if (centre) g.dispW else (1f - startFx) * g.dispW
                         val w = (startW + dPt).coerceIn(item.sizePt * 1.5f, maxW)
                         item.wrapPt = w
+                        item.breakPt = 0f
                         if (centre) item.fx = (startFx + (startW - w) / 2f / g.dispW).coerceIn(0f, 1f)
                         positionTyping()
                     }
@@ -887,9 +929,11 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         val tl = doc.fracToScreen(item.page, android.graphics.RectF(item.fx, item.fy, item.fx, item.fy)) ?: return
         val lp = typeBox.layoutParams as FrameLayout.LayoutParams
         lp.gravity = android.view.Gravity.TOP or android.view.Gravity.START
-        lp.width = (item.wrapPt * px + 3f).toInt().coerceAtLeast((48 * resources.displayMetrics.density).toInt())
+        // the box wraps where the saved text will wrap
+        val breakW = if (item.breakPt > 0f && item.align != TextAlign.CENTER && item.align != TextAlign.RIGHT) item.breakPt else item.wrapPt
+        lp.width = (breakW * px + 3f).toInt().coerceAtLeast((48 * resources.displayMetrics.density).toInt())
         lp.leftMargin = tl.left.toInt()
-        lp.topMargin = tl.top.toInt()
+        lp.topMargin = (tl.top + typeBaselineShift).toInt()
         typeBox.layoutParams = lp
         // width handle on the right edge, beside the first line
         val hl = typeHandle.layoutParams as FrameLayout.LayoutParams
@@ -899,7 +943,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         hl.topMargin = (lp.topMargin + item.sizePt * px * 0.6f - hs / 2f).toInt()
         typeHandle.layoutParams = hl
         // keep the text size in step with zoom
-        val want = item.sizePt * px
+        val want = item.sizePt * px * TextRender.glyphScale(item)
         if (kotlin.math.abs(typeBox.textSize - want) > 0.5f) styleTypeBox()
     }
 
@@ -966,7 +1010,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             val text = if (whole) joinLines(lines) else line.text
             val g = pdf!!.geoms[lay.page]
             val item = buildReplacement(lay.page, lines, text, old.font, old.bold, old.italic,
-                if (whole) BetaEdit.blockAlign(lines, g) else BetaEdit.lineAlign(lay, line, g))
+                if (whole) BetaEdit.blockAlign(lines, g) else BetaEdit.lineAlign(lay, line, g), lay.lines)
             val i = items.indexOf(old)
             if (i >= 0) items[i] = item else items.add(item)
             typingWhole = whole
@@ -1014,7 +1058,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                 item.bold == typingBold && item.italic == typingItalic && item.color == typingInk && !typingWhole -> items.remove(item)
             else -> {
                 item.plain = raw
-                item.text = TextRender.wrap(item, raw, item.wrapPt)
+                item.text = TextRender.wrapItem(item, raw)
                 record()
             }
         }

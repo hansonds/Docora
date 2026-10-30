@@ -67,12 +67,13 @@ object ShareSheet {
             Option("Maximum", "Smallest possible · for strict upload limits", R.drawable.ic_compress, CompressLevel.MAX, false)
         ) else listOf(
             Option("Original", "Best quality, unchanged", R.drawable.ic_file, null, false),
-            Option("Compressed", "Great quality · WhatsApp & email", R.drawable.ic_compress, CompressLevel.MEDIUM, true),
+            Option("Compressed", "Great quality · WhatsApp & email", R.drawable.ic_compress, CompressLevel.MEDIUM, false),
             Option("Smallest", "Smallest file · fast to send", R.drawable.ic_compress, CompressLevel.STRONG, false)
         )
         val primary = ContextCompat.getColor(a, Themes.accent(a).primary)
         val outline = MaterialColors(a)
-        var chosen = opts[1]
+        // sharing starts on the original file; compressing on the recommended level
+        var chosen = if (forCompress) opts[1] else opts[0]
         val box = view.findViewById<LinearLayout>(R.id.options)
         val shareBtn = view.findViewById<MaterialButton>(R.id.btnShare)
 
