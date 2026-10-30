@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- About: header, feature sections (filled in by AboutActivity), developer, credits -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
@@ -19,40 +20,189 @@
 
         <LinearLayout
             android:id="@+id/content"
-            android:layout_gravity="center_horizontal"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:gravity="center_horizontal"
+            android:layout_gravity="center_horizontal"
             android:orientation="vertical"
-            android:padding="20dp">
+            android:paddingHorizontal="16dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="28dp">
 
-            <ImageView
-                android:layout_width="96dp"
-                android:layout_height="96dp"
-                android:layout_marginTop="8dp"
-                android:contentDescription="@null"
-                android:src="@drawable/app_logo" />
+            <!-- header -->
+            <LinearLayout
+                android:id="@+id/hero"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_horizontal"
+                android:orientation="vertical"
+                android:paddingHorizontal="20dp"
+                android:paddingTop="26dp"
+                android:paddingBottom="22dp">
+
+                <FrameLayout
+                    android:id="@+id/logoBox"
+                    android:layout_width="92dp"
+                    android:layout_height="92dp"
+                    android:elevation="6dp">
+
+                    <ImageView
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:contentDescription="@null"
+                        android:src="@drawable/app_logo" />
+                </FrameLayout>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="Docora"
+                    android:textColor="#FFFFFF"
+                    android:textSize="30sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:alpha="0.92"
+                    android:text="PDF Editor &amp; Scanner"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp" />
+
+                <TextView
+                    android:id="@+id/version"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:paddingHorizontal="12dp"
+                    android:paddingVertical="4dp"
+                    android:textColor="#FFFFFF"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+
+                <com.google.android.material.chip.ChipGroup
+                    android:id="@+id/badges"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    app:chipSpacingHorizontal="6dp"
+                    app:chipSpacingVertical="0dp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:alpha="0.95"
+                    android:gravity="center"
+                    android:lineSpacingMultiplier="1.2"
+                    android:text="Every feature is free for everyone. No subscription, no watermark, no locked extras — and your documents never leave your phone."
+                    android:textColor="#FFFFFF"
+                    android:textSize="13.5sp" />
+            </LinearLayout>
 
             <TextView
                 android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:layout_marginTop="22dp"
+                android:layout_marginBottom="8dp"
+                android:text="What Docora can do"
+                android:textAppearance="@style/TextAppearance.App.Section" />
+
+            <!-- feature cards are added here -->
+            <LinearLayout
+                android:id="@+id/features"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+
+            <!-- developer -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                app:cardCornerRadius="20dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="18dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:id="@+id/devAvatar"
+                            android:layout_width="52dp"
+                            android:layout_height="52dp"
+                            android:gravity="center"
+                            android:text="H"
+                            android:textColor="#FFFFFF"
+                            android:textSize="22sp"
+                            android:textStyle="bold" />
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="14dp"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Hanson"
+                                android:textAppearance="@style/TextAppearance.Material3.TitleLarge"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Designed &amp; built by"
+                                android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                                android:textColor="?attr/colorOnSurfaceVariant" />
+                        </LinearLayout>
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="14dp"
+                        android:orientation="horizontal">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnWeb"
+                            style="@style/Widget.App.PrimaryButton"
+                            android:layout_width="0dp"
+                            android:layout_height="48dp"
+                            android:layout_marginEnd="6dp"
+                            android:layout_weight="1"
+                            android:text="phoenicx.org"
+                            app:icon="@drawable/ic_web" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnPrivacy"
+                            style="@style/Widget.App.SecondaryButton"
+                            android:layout_width="0dp"
+                            android:layout_height="48dp"
+                            android:layout_marginStart="6dp"
+                            android:layout_weight="1"
+                            android:text="Privacy"
+                            app:icon="@drawable/ic_lock" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- status + credits -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:gravity="center"
-                android:text="@string/app_full_name"
-                android:textAppearance="@style/TextAppearance.Material3.HeadlineSmall"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/version"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
-                android:textColor="?attr/colorOnSurfaceVariant" />
-
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="22dp">
+                app:cardCornerRadius="20dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -61,94 +211,53 @@
                     android:padding="18dp">
 
                     <TextView
+                        android:id="@+id/secStatus"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Developer"
-                        android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-                        android:textColor="?attr/colorOnSurfaceVariant" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="Hanson"
-                        android:textAppearance="@style/TextAppearance.Material3.TitleLarge"
-                        android:textStyle="bold" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnWeb"
-                        style="@style/Widget.App.SecondaryButton"
-                        android:layout_height="52dp"
-                        android:layout_width="match_parent"
-                        android:layout_marginTop="14dp"
-                        android:text="phoenicx.org"
-                        app:icon="@drawable/ic_web" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="14dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="18dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Features"
-                        android:textAppearance="@style/TextAppearance.App.Section" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:lineSpacingMultiplier="1.35"
-                        android:text="Everything is free — no ads, no watermark, no account, works offline.\n\nSCAN\n• AI scanner (Google on-device): edge detection, auto capture, removes shadows, stains and fingers\n• Built-in camera with live edge detection\n• Filters, multi-page, ID card (2 sides on one page)\n• Searchable PDFs (OCR)\n\nEDIT\n• Sign (photo or finger-drawn), text, draw, highlight, shapes, whiteout, images, stamps — rotate and resize\n• Fill PDF forms, select &amp; copy text, undo / redo\n• Save, Save as (any folder), share with compression, print, night reading\n• Open any PDF: large, password-protected or damaged\n\nTOOLS\n• Merge, split, extract, organize pages\n• Compress, PDF to JPG, images to PDF\n• Extract text (OCR), make searchable\n• Lock / unlock with password\n• Watermark, page numbers\n\nLOOK\n• Light, dark or system theme, 7 colours, pure black mode\n• Phones and tablets" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="14dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="18dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Status"
+                        android:drawablePadding="12dp"
+                        android:gravity="center_vertical"
+                        android:text="Engines"
                         android:textAppearance="@style/TextAppearance.App.Section" />
 
                     <TextView
                         android:id="@+id/engine"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp" />
+                        android:layout_marginTop="10dp"
+                        android:lineSpacingMultiplier="1.35"
+                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium" />
 
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="14dp"
-                        android:text="Open-source components: OpenCV (Apache 2.0), PdfBox-Android (Apache 2.0), AndroidX and Material Components (Apache 2.0)."
+                        android:text="Open-source credits"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/credits"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:lineSpacingMultiplier="1.3"
                         android:textAppearance="@style/TextAppearance.Material3.BodySmall"
                         android:textColor="?attr/colorOnSurfaceVariant" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnFontLicence"
+                        style="@style/Widget.Material3.Button.TextButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="Font licence (SIL OFL 1.1)" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
             <TextView
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="20dp"
+                android:layout_marginTop="22dp"
                 android:gravity="center"
                 android:lineSpacingMultiplier="1.3"
                 android:text="Made with ♥ by Hanson\nphoenicx.org"
