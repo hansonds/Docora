@@ -103,6 +103,20 @@ object Translator {
         }
     }
 
+    /** Translates many short texts with one client (null entries are skipped and stay null). */
+    fun translateAll(texts: List<String?>, from: String, to: String): List<String?> {
+        if (from == to) return texts
+        val client = Translation.getClient(TranslatorOptions.Builder().setSourceLanguage(from).setTargetLanguage(to).build())
+        try {
+            return texts.map { t ->
+                if (t.isNullOrBlank()) null
+                else chunks(t).joinToString("") { c -> if (c.isBlank()) c else Tasks.await(client.translate(c)) }
+            }
+        } finally {
+            client.close()
+        }
+    }
+
     /** Splits text into pieces of at most ~1500 characters at paragraph / sentence ends, keeping line breaks. */
     private fun chunks(text: String): List<String> {
         val out = ArrayList<String>()

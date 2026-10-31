@@ -34,7 +34,7 @@ object TranslateSheet {
     private fun accent(a: Context) = ContextCompat.getColor(a, Themes.accent(a).primary)
 
     /** Button with an outline (no fill). */
-    private fun outlined(a: Context) = MaterialButton(a).apply {
+    fun outlined(a: Context) = MaterialButton(a).apply {
         backgroundTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.TRANSPARENT)
         strokeWidth = (1.5f * a.resources.displayMetrics.density).toInt()
         strokeColor = android.content.res.ColorStateList.valueOf(ContextCompat.getColor(a, R.color.md_outline))
@@ -43,7 +43,7 @@ object TranslateSheet {
     }
 
     /** Text-only button. */
-    private fun plain(a: Context) = MaterialButton(a).apply {
+    fun plain(a: Context) = MaterialButton(a).apply {
         backgroundTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.TRANSPARENT)
         setTextColor(accent(a))
         elevation = 0f
