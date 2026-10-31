@@ -790,8 +790,6 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     }
 
     /** Paragraph lines joined into running text (a hyphen at a line end joins the word). */
-    private fun joinLines(lines: List<TextLine>): String = joinLinesStyled(lines).first
-
     /** Joined text plus the style of each character (null if unknown). */
     private fun joinLinesStyled(lines: List<TextLine>): Pair<String, IntArray?> {
         val sb = StringBuilder()

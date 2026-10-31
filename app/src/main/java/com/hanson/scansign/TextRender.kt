@@ -30,8 +30,6 @@ object TextRender {
     private class PdfFace(val face: Typeface, val bold: Boolean, val italic: Boolean)
     private val pdfFaces = HashMap<String, PdfFace>()
 
-    fun hasPdfFace(name: String) = synchronized(pdfFaces) { pdfFaces.containsKey(name) }
-
     fun registerPdfFace(name: String, bytes: ByteArray, bold: Boolean, italic: Boolean) {
         val dir = java.io.File(cacheDir ?: return, "pdffonts").apply { mkdirs() }
         val file = java.io.File(dir, "f_" + Integer.toHexString(name.hashCode()) + ".ttf")
@@ -95,6 +93,8 @@ object TextRender {
     fun fontFile(font: TextFont, bold: Boolean, italic: Boolean): String? {
         val fam = when (font) { TextFont.SANS -> "Sans"; TextFont.SERIF -> "Serif"; TextFont.MONO -> return null }
         val st = when { bold && italic -> "BoldItalic"; bold -> "Bold"; italic -> "Italic"; else -> "Regular" }
+        // Liberation Sans Regular already ships inside the PDF library: use that copy instead of a second one
+        if (fam == "Sans" && st == "Regular") return "com/tom_roush/pdfbox/resources/ttf/LiberationSans-Regular.ttf"
         return "fonts/Liberation$fam-$st.ttf"
     }
 

@@ -11,10 +11,23 @@ android {
         applicationId "com.hanson.docora"
         minSdk 26
         targetSdk 36
-        versionCode 42
-        versionName "6.0"
+        versionCode 43
+        versionName "6.1"
         ndk {
             abiFilters 'arm64-v8a', 'armeabi-v7a'
+        }
+        // the app is in English: don't ship libraries' translations of their own built-in texts
+        resourceConfigurations += ['en']
+    }
+
+    // separate APKs per phone type (64-bit = nearly all phones since 2017), plus one for every phone.
+    // The Play Store bundle is unaffected: Play already sends each phone only its own part.
+    splits {
+        abi {
+            enable true
+            reset()
+            include 'arm64-v8a', 'armeabi-v7a'
+            universalApk true
         }
     }
 
@@ -62,7 +75,8 @@ android {
             useLegacyPackaging = false
         }
         resources {
-            excludes += ['META-INF/DEPENDENCIES', 'META-INF/LICENSE*', 'META-INF/NOTICE*']
+            // + post-quantum crypto tables from BouncyCastle (PDF passwords never use them): ~4 MB
+            excludes += ['META-INF/DEPENDENCIES', 'META-INF/LICENSE*', 'META-INF/NOTICE*', 'org/bouncycastle/pqc/**']
         }
     }
 }
@@ -87,7 +101,6 @@ dependencies {
     // on-device translation (languages downloaded on demand) and language detection
     implementation 'com.google.mlkit:translate:17.0.3'
     implementation 'com.google.mlkit:language-id:17.0.6'
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1'
     implementation 'org.opencv:opencv:4.12.0'
     implementation 'com.tom-roush:pdfbox-android:2.0.27.0'
 }

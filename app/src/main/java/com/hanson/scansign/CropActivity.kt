@@ -41,8 +41,6 @@ class CropActivity : BaseActivity() {
         const val EXTRA_HINT = "hint"
         const val MODE_DOC = "doc"
         const val MODE_SIG = "sig"
-        private const val PREFS = "scan"
-        private const val KEY_FILTER = "filter"
 
         /** [hint] = live-camera corners as fractions (x0,y0,...,x3,y3), used if detection on the photo fails. */
         fun intent(ctx: Context, src: File, mode: String, hint: FloatArray? = null) =
