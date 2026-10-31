@@ -1340,8 +1340,15 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
 
     /** Translates the page being read (its own text, or text read from a scan). */
     private fun translatePage() {
-        val page = doc.currentPage()
-        TranslateSheet.show(this, "Page ${page + 1}") { readPageText(page) }
+        val p = pdf ?: return
+        PageTranslate.show(this, displayName, p.geoms.size, doc.currentPage(),
+            load = { page ->
+                val g = p.geoms[page]
+                val w = if (g.dispW >= g.dispH) 2000 else 1500
+                pageBitmap(page, w)?.let { bmp -> PageTranslate.Source(bmp, layoutFor(page), g.dispW, g.dispH) }
+            },
+            pageText = { page -> readPageText(page) },
+            openPdf = { f -> startActivity(intent(this, f, f.name)) })
     }
 
     /** The words on a page in reading order: the PDF's text, or on-device OCR for scanned pages. */
