@@ -46,7 +46,9 @@ jobs:
           fi
 
       - name: Build release APK and Play Store bundle
-        run: gradle assembleRelease bundleRelease --no-daemon --stacktrace
+        run: |
+          gradle bundleRelease --no-daemon --stacktrace
+          gradle assembleRelease -PapkSplits --no-daemon --stacktrace
 
       - name: Rename APK
         run: |
