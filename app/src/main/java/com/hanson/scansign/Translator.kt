@@ -60,9 +60,120 @@ object Translator {
         return models.map { it.language }.toSet() + TranslateLanguage.ENGLISH
     }
 
-    fun download(ctx: Context, code: String) {
+    /** A download that can't go on, with the reason in plain words (shown to the user). */
+    class DownloadProblem(message: String, val openDownloadManager: Boolean = false) : Exception(message)
+
+    private const val DM_PACKAGE = "com.android.providers.downloads"
+
+    /** True when the phone's Download Manager (which fetches the language files) is switched off. */
+    fun downloadManagerOff(ctx: Context): Boolean = try {
+        when (ctx.packageManager.getApplicationEnabledSetting(DM_PACKAGE)) {
+            android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+            android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER,
+            android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED_UNTIL_USED -> true
+            else -> false
+        }
+    } catch (_: Throwable) { false }
+
+    /** Opens the Download Manager's settings page so it can be switched on. */
+    fun openDownloadManagerSettings(ctx: Context) {
+        try {
+            ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                android.net.Uri.parse("package:$DM_PACKAGE")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (_: Throwable) {
+            try { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Throwable) {}
+        }
+    }
+
+    /** Where the language files' downloads are: bytes so far / total, and why they wait (if they do). */
+    private class Dl(val done: Long, val total: Long, val status: Int, val reason: Int)
+
+    /** The language downloads of this app that haven't finished (Docora itself never uses the Download Manager). */
+    private fun pending(ctx: Context): List<Pair<Long, Dl>> {
+        val dm = ctx.getSystemService(Context.DOWNLOAD_SERVICE) as? android.app.DownloadManager ?: return emptyList()
+        val out = ArrayList<Pair<Long, Dl>>()
+        try {
+            dm.query(android.app.DownloadManager.Query().setFilterByStatus(
+                android.app.DownloadManager.STATUS_PENDING or android.app.DownloadManager.STATUS_RUNNING or android.app.DownloadManager.STATUS_PAUSED
+            ))?.use { c ->
+                val id = c.getColumnIndex(android.app.DownloadManager.COLUMN_ID)
+                val so = c.getColumnIndex(android.app.DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
+                val tot = c.getColumnIndex(android.app.DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
+                val st = c.getColumnIndex(android.app.DownloadManager.COLUMN_STATUS)
+                val rs = c.getColumnIndex(android.app.DownloadManager.COLUMN_REASON)
+                while (c.moveToNext()) out.add(c.getLong(id) to Dl(c.getLong(so), c.getLong(tot), c.getInt(st), c.getInt(rs)))
+            }
+        } catch (_: Throwable) {}
+        return out
+    }
+
+    /** Cancels language downloads that are stuck waiting, so a new try starts fresh. */
+    fun cancelStuck(ctx: Context) {
+        val dm = ctx.getSystemService(Context.DOWNLOAD_SERVICE) as? android.app.DownloadManager ?: return
+        val ids = pending(ctx).map { it.first }
+        if (ids.isNotEmpty()) try { dm.remove(*ids.toLongArray()) } catch (_: Throwable) {}
+    }
+
+    private fun mb(b: Long) = if (b <= 0) "0" else String.format(Locale.US, "%.1f", b / 1048576.0)
+
+    /**
+     * Downloads a language and reports what is happening ([status], e.g. "12.3 of 30.1 MB" or
+     * "Waiting for Wi-Fi…"). Gives up with a [DownloadProblem] explaining why when the download
+     * can't start or stops moving, instead of waiting forever.
+     */
+    fun download(ctx: Context, code: String, status: ((String) -> Unit)? = null, keepGoing: () -> Boolean = { true }) {
         if (builtIn(code)) return
-        Tasks.await(RemoteModelManager.getInstance().download(TranslateRemoteModel.Builder(code).build(), conditions(ctx)))
+        if (downloadManagerOff(ctx)) throw DownloadProblem(
+            "Your phone's Download Manager is turned off, and the language files are downloaded through it. " +
+                "Turn it on (Settings › Apps › Download Manager › Enable), then try again.", openDownloadManager = true)
+        val task = RemoteModelManager.getInstance().download(TranslateRemoteModel.Builder(code).build(), conditions(ctx))
+        val start = System.currentTimeMillis()
+        var lastBytes = -1L
+        var lastMove = start
+        var wifiSince = 0L
+        while (!task.isComplete) {
+            Thread.sleep(700)
+            if (!keepGoing()) throw DownloadProblem("Cancelled.")
+            val now = System.currentTimeMillis()
+            val dls = pending(ctx).map { it.second }
+            val bytes = dls.sumOf { it.done.coerceAtLeast(0) }
+            val total = dls.sumOf { it.total.coerceAtLeast(0) }
+            if (bytes != lastBytes) { lastBytes = bytes; lastMove = now }
+            val paused = dls.firstOrNull { it.status == android.app.DownloadManager.STATUS_PAUSED }
+            val msg = when {
+                paused?.reason == android.app.DownloadManager.PAUSED_QUEUED_FOR_WIFI -> {
+                    if (wifiSince == 0L) wifiSince = now
+                    "Waiting for Wi-Fi…"
+                }
+                paused?.reason == android.app.DownloadManager.PAUSED_WAITING_FOR_NETWORK -> "Waiting for the internet…"
+                paused?.reason == android.app.DownloadManager.PAUSED_WAITING_TO_RETRY -> "Connection problem — trying again…"
+                dls.any { it.status == android.app.DownloadManager.STATUS_RUNNING } && total > 0 -> "${mb(bytes)} of ${mb(total)} MB"
+                dls.isNotEmpty() -> "Starting the download…"
+                else -> "Preparing…"
+            }
+            if (paused?.reason != android.app.DownloadManager.PAUSED_QUEUED_FOR_WIFI) wifiSince = 0L
+            status?.invoke(msg)
+            // the phone keeps large downloads for Wi-Fi: say so instead of waiting silently
+            if (wifiSince != 0L && now - wifiSince > 15_000) throw DownloadProblem(
+                "This phone only allows large downloads on Wi-Fi, so the language is waiting for Wi-Fi. " +
+                    "Connect to Wi-Fi and try again (or it will finish by itself once Wi-Fi is on).")
+            // nothing has moved for a long time
+            if (now - lastMove > 90_000) {
+                cancelStuck(ctx)
+                throw DownloadProblem(
+                    "The download isn't moving. Please check:\n" +
+                        "• the internet works (try Wi-Fi)\n" +
+                        "• Data saver and Battery saver are off (or Docora is allowed)\n" +
+                        "• no VPN, ad-blocker or Private DNS is blocking Google downloads\n" +
+                        "Then try again.")
+            }
+        }
+        if (!task.isSuccessful) {
+            val e = task.exception
+            throw DownloadProblem(
+                if (wifiOnly(ctx)) "Couldn't download — connect to Wi-Fi, or turn off \"Download only on Wi-Fi\" in Manage languages."
+                else "Couldn't download${e?.message?.let { " ($it)" } ?: ""}. Check your internet connection and try again.")
+        }
     }
 
     fun delete(code: String) {

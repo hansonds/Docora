@@ -20,6 +20,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.progressindicator.LinearProgressIndicator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -197,14 +198,24 @@ object TranslateSheet {
                     progress.visibility = View.VISIBLE
                     note.text = "Downloading ${missing.joinToString(" and ") { Translator.name(it) }}…"
                     job = a.lifecycleScope.launch {
-                        val ok = withContext(Dispatchers.IO) {
-                            try { missing.forEach { Translator.download(a, it) }; true } catch (_: Throwable) { false }
+                        val problem = withContext(Dispatchers.IO) {
+                            try {
+                                missing.forEach { code ->
+                                    Translator.download(a, code,
+                                        status = { s -> a.runOnUiThread { note.text = "Downloading ${Translator.name(code)} · $s" } },
+                                        keepGoing = { isActive && sheet.isShowing })
+                                }
+                                null
+                            } catch (e: Throwable) { e }
                         }
                         progress.visibility = View.GONE
                         downloadBtn.isEnabled = true
-                        if (!ok) {
-                            note.text = if (Translator.wifiOnly(a)) "Couldn't download — connect to Wi-Fi (or turn off \"Wi-Fi only\" in Manage languages)."
-                            else "Couldn't download — check your internet connection and try again."
+                        if (problem != null) {
+                            note.text = (problem as? Translator.DownloadProblem)?.message
+                                ?: "Couldn't download — check your internet connection and try again."
+                            downloadBtn.text = "Try again"
+                            if ((problem as? Translator.DownloadProblem)?.openDownloadManager == true)
+                                Translator.openDownloadManagerSettings(a)
                             return@launch
                         }
                         have = have + missing

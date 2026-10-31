@@ -38,6 +38,7 @@ import com.tom_roush.pdfbox.pdmodel.graphics.image.JPEGFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -322,11 +323,22 @@ object PageTranslate {
                         return Result(src, null, lang, "${missing.joinToString(" and ") { Translator.name(it) }} isn't downloaded yet.")
                 } else {
                     progress("Downloading ${missing.joinToString(" and ") { Translator.name(it) }}…")
-                    val ok = withContext(Dispatchers.IO) { try { missing.forEach { Translator.download(a, it) }; true } catch (_: Throwable) { false } }
-                    if (!ok && (lang in missing || to in missing)) return Result(src, null, lang,
-                        if (Translator.wifiOnly(a)) "Couldn't download — connect to Wi-Fi, or turn off \"Wi-Fi only\" in Manage languages."
-                        else "Couldn't download — check your internet connection and try again.")
-                    if (ok) have = have + missing
+                    val problem = withContext(Dispatchers.IO) {
+                        try {
+                            missing.forEach { code ->
+                                Translator.download(a, code,
+                                    status = { s -> a.runOnUiThread { progress("Downloading ${Translator.name(code)}\n$s") } },
+                                    keepGoing = { isActive && dlg.isShowing })
+                            }
+                            null
+                        } catch (e: Throwable) { e }
+                    }
+                    if (problem != null && (lang in missing || to in missing)) {
+                        if ((problem as? Translator.DownloadProblem)?.openDownloadManager == true) Translator.openDownloadManagerSettings(a)
+                        return Result(src, null, lang, "${missing.joinToString(" and ") { Translator.name(it) }} isn't downloaded yet.\n\n" +
+                            ((problem as? Translator.DownloadProblem)?.message ?: "Check your internet connection and try again."))
+                    }
+                    if (problem == null) have = have + missing
                 }
             }
             val langs = texts.indices.map { k ->

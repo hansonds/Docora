@@ -7,7 +7,6 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
-import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.appbar.MaterialToolbar
@@ -130,14 +129,17 @@ class TranslateLanguagesActivity : BaseActivity() {
         }
     }
 
+    /** Live download state per language ("12.3 of 30.1 MB", "Waiting for Wi-Fi…"). */
+    private val progress = HashMap<String, String>()
+
     private fun show(r: Row) {
         val code = r.lang.code
         val loading = code in busy
         r.spinner.visibility = if (loading) View.VISIBLE else View.GONE
-        r.button.isEnabled = !loading && !Translator.builtIn(code)
+        r.button.isEnabled = !Translator.builtIn(code)
         when {
             Translator.builtIn(code) -> { r.status.text = "Always included"; r.button.text = "Included" }
-            loading -> { r.status.text = "Downloading…"; r.button.text = "Wait" }
+            loading -> { r.status.text = progress[code] ?: "Downloading…"; r.button.text = "Cancel" }
             code in have -> { r.status.text = "✓ Downloaded · works offline"; r.button.text = "Delete" }
             else -> { r.status.text = "About ${Translator.MODEL_MB} MB"; r.button.text = "Download" }
         }
@@ -145,26 +147,53 @@ class TranslateLanguagesActivity : BaseActivity() {
 
     private fun act(r: Row) {
         val code = r.lang.code
-        if (code in have) {
-            MaterialAlertDialogBuilder(this)
+        when {
+            code in busy -> {
+                // cancel: stop waiting and clear the phone's queued download
+                cancelled.add(code)
+                lifecycleScope.launch(Dispatchers.IO) { Translator.cancelStuck(this@TranslateLanguagesActivity) }
+            }
+            code in have -> MaterialAlertDialogBuilder(this)
                 .setTitle("Delete ${r.lang.name}?")
                 .setMessage("Frees about ${Translator.MODEL_MB} MB. You can download it again any time.")
                 .setPositiveButton("Delete") { _, _ -> run(r) { Translator.delete(code) } }
                 .setNegativeButton("Cancel", null)
                 .show()
-        } else run(r) { Translator.download(this, code) }
+            else -> run(r) {
+                Translator.download(this, code,
+                    status = { s -> runOnUiThread { progress[code] = s; show(r) } },
+                    keepGoing = { code !in cancelled && !isDestroyed })
+            }
+        }
     }
 
+    private val cancelled = HashSet<String>()
+
     private fun run(r: Row, work: () -> Unit) {
-        busy.add(r.lang.code)
+        val code = r.lang.code
+        busy.add(code)
+        cancelled.remove(code)
+        progress.remove(code)
         show(r)
         lifecycleScope.launch {
-            val ok = withContext(Dispatchers.IO) { try { work(); true } catch (_: Throwable) { false } }
-            busy.remove(r.lang.code)
-            if (!ok) Toast.makeText(this@TranslateLanguagesActivity,
-                if (Translator.wifiOnly(this@TranslateLanguagesActivity)) "Couldn't download — connect to Wi-Fi, or turn off \"Wi-Fi only\""
-                else "Couldn't finish — check your internet connection", Toast.LENGTH_LONG).show()
+            val problem = withContext(Dispatchers.IO) { try { work(); null } catch (e: Throwable) { e } }
+            busy.remove(code)
+            progress.remove(code)
+            val wasCancelled = cancelled.remove(code)
+            if (problem != null && !wasCancelled) explain(r, problem)
             refreshList()
         }
+    }
+
+    /** Says why a download failed, with a way to fix it. */
+    private fun explain(r: Row, e: Throwable) {
+        val p = e as? Translator.DownloadProblem
+        val b = MaterialAlertDialogBuilder(this)
+            .setTitle("${r.lang.name} didn't download")
+            .setMessage(p?.message ?: "Couldn't finish — check your internet connection and try again.")
+            .setPositiveButton("Try again") { _, _ -> act(r) }
+            .setNegativeButton("Close", null)
+        if (p?.openDownloadManager == true) b.setNeutralButton("Open settings") { _, _ -> Translator.openDownloadManagerSettings(this) }
+        b.show()
     }
 }
