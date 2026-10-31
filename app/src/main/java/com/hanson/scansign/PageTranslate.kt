@@ -56,7 +56,7 @@ import kotlin.math.sqrt
  */
 object PageTranslate {
 
-    const val MAX_PAGES = 35
+    const val MAX_PAGES = 40
     private const val AUTO = "auto"
 
     /** A page to translate: its picture, its text layout and its size in points. */

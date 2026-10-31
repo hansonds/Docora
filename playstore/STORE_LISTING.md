@@ -40,7 +40,7 @@ Docora is a complete PDF editor, document scanner and translator — and everyth
 • See the page translated in place: same layout, colours and text size, like a camera translator
 • Hold the page to compare with the original
 • Detects the language automatically, even on scanned pages
-• Save the translation as a new PDF (documents up to 35 pages)
+• Save the translation as a new PDF (documents up to 40 pages)
 • Download only the languages you need (about 30 MB each), then translate offline
 
 ★ SCAN DOCUMENTS
@@ -124,7 +124,7 @@ Based on Google's ML Kit disclosure (the app itself sends nothing):
 ```
 New: AI translator — translate selected text or whole pages into 59 languages, right on your phone and offline after a one-time download per language.
 • See pages translated in place, with the same layout, colours and text size. Hold the page to compare.
-• Save translations as a new PDF (up to 35 pages).
+• Save translations as a new PDF (up to 40 pages).
 • Translate button in full-screen reading; Translate is now first in the toolbar.
 • Better translations: whole sentences, lists and headings handled correctly.
 • Smaller app download.
