@@ -64,6 +64,7 @@
         <activity android:name=".OrganizeActivity" />
         <activity android:name=".TextResultActivity" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".SettingsActivity" />
+        <activity android:name=".TranslateLanguagesActivity" />
         <activity android:name=".DrawSignatureActivity" android:screenOrientation="unspecified" />
 
         <provider

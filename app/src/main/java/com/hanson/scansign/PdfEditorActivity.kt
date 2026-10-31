@@ -188,6 +188,11 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             doc.clearTextSelection()
         }
         findViewById<MaterialButton>(R.id.selAll).setOnClickListener { doc.selectAllText() }
+        findViewById<MaterialButton>(R.id.selTranslate).setOnClickListener {
+            val text = selText
+            doc.clearTextSelection()
+            TranslateSheet.show(this, "Selected text") { text }
+        }
         findViewById<MaterialButton>(R.id.selShare).setOnClickListener {
             startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"; putExtra(Intent.EXTRA_TEXT, selText)
@@ -1331,6 +1336,39 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         }
     }
 
+    // ---------------- translate ----------------
+
+    /** Translates the page being read (its own text, or text read from a scan). */
+    private fun translatePage() {
+        val page = doc.currentPage()
+        TranslateSheet.show(this, "Page ${page + 1}") { readPageText(page) }
+    }
+
+    /** The words on a page in reading order: the PDF's text, or on-device OCR for scanned pages. */
+    private suspend fun readPageText(page: Int): String {
+        val p = pdf ?: return ""
+        val text = withContext(Dispatchers.IO) {
+            searchLock.withLock {
+                try {
+                    val d = searchDoc ?: com.tom_roush.pdfbox.pdmodel.PDDocument.load(p.displayFile, "", PdfOpener.memory())
+                        .also { searchDoc = it }
+                    com.tom_roush.pdfbox.text.PDFTextStripper().apply {
+                        sortByPosition = true; startPage = page + 1; endPage = page + 1
+                    }.getText(d)
+                } catch (e: Throwable) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    ""
+                }
+            }
+        }
+        if (text.count { !it.isWhitespace() } >= 12) return text
+        // a scanned page: read it with OCR
+        val bmp = pageBitmap(page, 1800) ?: return text
+        return withContext(Dispatchers.IO) {
+            try { Ocr.recognize(this@PdfEditorActivity, bmp).first } catch (_: Throwable) { text }
+        }
+    }
+
     // ---------------- find in document ----------------
 
     private lateinit var findBar: View
@@ -1964,7 +2002,8 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         m.add(0, 8, 4, "Print")
         m.add(0, 9, 5, "Night reading").apply { isCheckable = true; isChecked = getSharedPreferences("view", MODE_PRIVATE).getBoolean("night", false) }
         m.add(0, 4, 6, "Go to page")
-        m.add(0, 6, 7, "More PDF tools")
+        m.add(0, 13, 7, "Translate page")
+        m.add(0, 6, 8, "More PDF tools")
         toolbar.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 11 -> setFullscreen(true)
@@ -1980,6 +2019,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                     doc.nightMode = item.isChecked
                 }
                 6 -> startActivity(Intent(this, ToolsActivity::class.java))
+                13 -> translatePage()
             }
             true
         }
@@ -2108,6 +2148,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         dockDivider(bar)
         toolButton(bar, "Pages", R.drawable.ic_pages) { setTool(ActiveTool.NONE); openPages() }
         toolButton(bar, "Get text", R.drawable.ic_ocr) { setTool(ActiveTool.NONE); extractText() }
+        toolButton(bar, "Translate", R.drawable.ic_web) { setTool(ActiveTool.NONE); translatePage() }
         toolButton(bar, "Go to", R.drawable.ic_pdf) { pagesSheet() }
         toolButton(bar, "Full screen", R.drawable.ic_fullscreen) { setFullscreen(true) }
         toolButton(bar, "Share", R.drawable.ic_share) { setTool(ActiveTool.NONE); shareCurrent() }

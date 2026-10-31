@@ -11,8 +11,8 @@ android {
         applicationId "com.hanson.docora"
         minSdk 26
         targetSdk 36
-        versionCode 38
-        versionName "5.6"
+        versionCode 39
+        versionName "5.7"
         ndk {
             abiFilters 'arm64-v8a', 'armeabi-v7a'
         }
@@ -84,6 +84,9 @@ dependencies {
     implementation 'com.google.android.gms:play-services-mlkit-document-scanner:16.0.0'
     implementation 'com.google.mlkit:text-recognition:16.0.1'
     implementation 'com.google.mlkit:text-recognition-devanagari:16.0.1'
+    // on-device translation (languages downloaded on demand) and language detection
+    implementation 'com.google.mlkit:translate:17.0.3'
+    implementation 'com.google.mlkit:language-id:17.0.6'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1'
     implementation 'org.opencv:opencv:4.12.0'
     implementation 'com.tom-roush:pdfbox-android:2.0.27.0'

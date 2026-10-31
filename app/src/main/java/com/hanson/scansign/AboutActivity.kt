@@ -59,6 +59,12 @@ class AboutActivity : BaseActivity() {
             "Find text with highlights, even in scans",
             "Page thumbnails, night reading, select and copy text"
         )),
+        Section(IconTiles.Hue.CYAN, R.drawable.ic_web, "Translate", listOf(
+            "Translate selected text or a whole page into 59 languages",
+            "Detects the language by itself — works on scanned pages too",
+            "Download only the languages you need (about 30 MB each), then it works offline",
+            "Copy or share the translation"
+        )),
         Section(IconTiles.Hue.GREEN, R.drawable.ic_tools, "PDF tools", listOf(
             "Merge, split, extract and organize pages",
             "Compress — see the new size before you share",
@@ -128,7 +134,7 @@ class AboutActivity : BaseActivity() {
         }
         findViewById<TextView>(R.id.credits).text =
             "OpenCV · PdfBox-Android · AndroidX & Material Components (Apache 2.0)\n" +
-            "Google ML Kit document scanner & text recognition\n" +
+            "Google ML Kit document scanner, text recognition & translation\n" +
             "Liberation Sans & Serif fonts (SIL Open Font License 1.1)"
         findViewById<View>(R.id.btnFontLicence).setOnClickListener {
             val text = try { assets.open("fonts/LICENSE-Liberation.txt").bufferedReader().use { it.readText() } } catch (_: Throwable) { "" }
