@@ -86,77 +86,122 @@ object PageTranslate {
         val dlg = Dialog(a, android.R.style.Theme_DeviceDefault_NoActionBar)
         val root = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(surface) }
 
-        // ---- top bar
-        val top = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(4f), dp(4f), dp(12f), dp(4f)) }
+        // ---- top bar: back · title · page pill
+        val top = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(4f), dp(6f), dp(14f), dp(6f)) }
         val close = ImageButton(a).apply {
             setImageResource(R.drawable.ic_back); setColorFilter(onSurface)
-            background = null; contentDescription = "Close"
+            background = round(a, Color.TRANSPARENT, 24f); contentDescription = "Close"
             setOnClickListener { dlg.dismiss() }
         }
         top.addView(close, LinearLayout.LayoutParams(dp(48f), dp(48f)))
         val titles = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
-        titles.addView(TextView(a).apply { text = "Translated page"; textSize = 18f; setTextColor(onSurface); setTypeface(typeface, Typeface.BOLD) })
-        val sub = TextView(a).apply { textSize = 12.5f; setTextColor(muted) }
+        titles.addView(TextView(a).apply { text = "Translate page"; textSize = 19f; setTextColor(onSurface); setTypeface(typeface, Typeface.BOLD); maxLines = 1 })
+        val sub = TextView(a).apply { text = "Offline · on your phone"; textSize = 12.5f; setTextColor(muted); maxLines = 1 }
         titles.addView(sub)
         top.addView(titles, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(6f) })
+        val pagePill = TextView(a).apply {
+            textSize = 13f; setTextColor(accent); setTypeface(typeface, Typeface.BOLD); gravity = Gravity.CENTER
+            setPadding(dp(12f), dp(5f), dp(12f), dp(5f))
+            background = round(a, (accent and 0x00FFFFFF) or 0x22000000, 50f)
+        }
+        top.addView(pagePill, LinearLayout.LayoutParams(-2, -2))
         root.addView(top)
 
-        // ---- languages
-        val langs = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12f), 0, dp(12f), dp(8f)) }
-        val fromBtn = TranslateSheet.outlined(a)
-        val swap = TranslateSheet.plain(a).apply { text = "⇄"; textSize = 20f }
-        val toBtn = MaterialButton(a)
-        langs.addView(fromBtn, LinearLayout.LayoutParams(0, dp(50f), 1f))
-        langs.addView(swap, LinearLayout.LayoutParams(dp(54f), dp(50f)))
-        langs.addView(toBtn, LinearLayout.LayoutParams(0, dp(50f), 1f))
-        root.addView(langs)
+        // ---- languages: [From ▾]  ⇄  [To ▾] in one rounded bar
+        val langBar = LinearLayout(a).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(6f), dp(6f), dp(6f), dp(6f))
+            background = round(a, ContextCompat.getColor(a, R.color.md_surface_variant), 22f)
+        }
+        fun langChip(caption: String): Pair<LinearLayout, TextView> {
+            val box = LinearLayout(a).apply {
+                orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
+                setPadding(dp(10f), dp(5f), dp(10f), dp(6f))
+                isClickable = true; isFocusable = true
+                background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x22000000), round(a, surface, 16f), null)
+            }
+            box.addView(TextView(a).apply { text = caption; textSize = 11f; setTextColor(muted); gravity = Gravity.CENTER })
+            val name = TextView(a).apply {
+                textSize = 15f; setTextColor(onSurface); setTypeface(typeface, Typeface.BOLD); gravity = Gravity.CENTER
+                maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
+                setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, tinted(a, R.drawable.ic_chevron_down, muted, 16f), null)
+                compoundDrawablePadding = dp(2f)
+            }
+            box.addView(name, LinearLayout.LayoutParams(-2, -2))
+            return box to name
+        }
+        val (fromBtn, fromName) = langChip("From")
+        val (toBtn, toName) = langChip("To")
+        val swap = ImageButton(a).apply {
+            setImageResource(R.drawable.ic_swap); setColorFilter(Color.WHITE); contentDescription = "Swap languages"
+            background = round(a, accent, 22f)
+        }
+        langBar.addView(fromBtn, LinearLayout.LayoutParams(0, dp(54f), 1f))
+        langBar.addView(swap, LinearLayout.LayoutParams(dp(44f), dp(44f)).apply { marginStart = dp(8f); marginEnd = dp(8f) })
+        langBar.addView(toBtn, LinearLayout.LayoutParams(0, dp(54f), 1f))
+        root.addView(langBar, LinearLayout.LayoutParams(-1, -2).apply { marginStart = dp(12f); marginEnd = dp(12f); bottomMargin = dp(10f) })
 
         // ---- page picture
-        val stage = FrameLayout(a).apply { setBackgroundColor(Color.rgb(40, 40, 44)) }
+        val stage = FrameLayout(a).apply { setBackgroundColor(Color.rgb(38, 38, 42)) }
         val image = ZoomImage(a)
         stage.addView(image, FrameLayout.LayoutParams(-1, -1))
         val badge = TextView(a).apply {
-            textSize = 12f; setTextColor(Color.WHITE); setPadding(dp(10f), dp(4f), dp(10f), dp(4f))
-            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = 50 * d; setColor(Color.argb(170, 0, 0, 0)) }
+            textSize = 12f; setTextColor(Color.WHITE); setTypeface(typeface, Typeface.BOLD)
+            setPadding(dp(12f), dp(5f), dp(12f), dp(5f))
+            background = round(a, Color.argb(175, 0, 0, 0), 50f)
             visibility = View.GONE
         }
-        stage.addView(badge, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(10f) })
+        stage.addView(badge, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(12f) })
+        val hint = TextView(a).apply {
+            text = "Hold the page to see the original"; textSize = 11.5f; setTextColor(Color.WHITE)
+            setPadding(dp(10f), dp(4f), dp(10f), dp(4f))
+            background = round(a, Color.argb(140, 0, 0, 0), 50f)
+            visibility = View.GONE
+        }
+        stage.addView(hint, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(12f) })
         val busyBox = LinearLayout(a).apply {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(20f), dp(16f), dp(20f), dp(16f))
-            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = 18 * d; setColor(Color.argb(215, 20, 20, 24)) }
+            setPadding(dp(22f), dp(18f), dp(22f), dp(18f))
+            background = round(a, Color.argb(225, 22, 22, 26), 20f)
         }
         val spinner = ProgressBar(a)
         busyBox.addView(spinner, LinearLayout.LayoutParams(dp(36f), dp(36f)))
-        val status = TextView(a).apply { textSize = 14f; setTextColor(Color.WHITE); gravity = Gravity.CENTER; setPadding(0, dp(8f), 0, 0) }
+        val status = TextView(a).apply { textSize = 14f; setTextColor(Color.WHITE); gravity = Gravity.CENTER; setPadding(0, dp(10f), 0, 0) }
         busyBox.addView(status, LinearLayout.LayoutParams(-2, -2))
         val busyAction = MaterialButton(a).apply { visibility = View.GONE }
-        busyBox.addView(busyAction, LinearLayout.LayoutParams(-2, dp(46f)).apply { topMargin = dp(10f) })
-        stage.addView(busyBox, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER).apply { marginStart = dp(24f); marginEnd = dp(24f) })
+        busyBox.addView(busyAction, LinearLayout.LayoutParams(-2, dp(46f)).apply { topMargin = dp(12f) })
+        stage.addView(busyBox, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER).apply { marginStart = dp(28f); marginEnd = dp(28f) })
         root.addView(stage, LinearLayout.LayoutParams(-1, 0, 1f))
 
-        // ---- bottom bar
-        val bottom = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12f), dp(8f), dp(12f), dp(10f)) }
-        val row = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        val prev = TranslateSheet.plain(a).apply { text = "‹"; textSize = 24f; contentDescription = "Previous page" }
-        val next = TranslateSheet.plain(a).apply { text = "›"; textSize = 24f; contentDescription = "Next page" }
-        val compare = TranslateSheet.outlined(a).apply { text = "Original" }
-        val textBtn = TranslateSheet.outlined(a).apply { text = "Text" }
-        val shareBtn = TranslateSheet.outlined(a).apply { text = "Share" }
-        if (pages.size > 1) row.addView(prev, LinearLayout.LayoutParams(dp(48f), dp(48f)))
-        row.addView(compare, LinearLayout.LayoutParams(0, dp(48f), 1f).apply { marginStart = dp(3f); marginEnd = dp(3f) })
-        row.addView(textBtn, LinearLayout.LayoutParams(0, dp(48f), 1f).apply { marginStart = dp(3f); marginEnd = dp(3f) })
-        row.addView(shareBtn, LinearLayout.LayoutParams(0, dp(48f), 1f).apply { marginStart = dp(3f); marginEnd = dp(3f) })
-        if (pages.size > 1) row.addView(next, LinearLayout.LayoutParams(dp(48f), dp(48f)))
+        // ---- bottom: evenly spaced tools (same look as the editor dock) + save
+        val bottom = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(10f), dp(6f), dp(10f), dp(12f)) }
+        val row = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+        fun tool(label: String, icon: Int): View {
+            val v = android.view.LayoutInflater.from(a).inflate(R.layout.view_dock_tool, row, false)
+            v.findViewById<ImageView>(R.id.toolIcon).setImageResource(icon)
+            v.findViewById<TextView>(R.id.toolLabel).text = label
+            v.contentDescription = label
+            row.addView(v, LinearLayout.LayoutParams(0, -2, 1f))
+            return v
+        }
+        val prev = if (pages.size > 1) tool("Previous", R.drawable.ic_chevron_left) else null
+        val compare = tool("Original", R.drawable.ic_compare)
+        val textBtn = tool("Text", R.drawable.ic_text)
+        val shareBtn = tool("Share", R.drawable.ic_share)
+        val next = if (pages.size > 1) tool("Next", R.drawable.ic_chevron_right) else null
+        fun setLabel(v: View, s: String) { v.findViewById<TextView>(R.id.toolLabel).text = s; v.contentDescription = s }
+        fun enable(v: View?, on: Boolean) { v ?: return; v.isEnabled = on; v.alpha = if (on) 1f else 0.38f }
         bottom.addView(row)
         val saveBtn = MaterialButton(a).apply {
-            text = if (pages.size > 1) "Save as new PDF (${pages.size} pages)" else "Save as new PDF"
-            setIconResource(R.drawable.ic_pdf)
+            text = if (pages.size > 1) "Save as new PDF  ·  ${pages.size} pages" else "Save as new PDF"
+            setIconResource(R.drawable.ic_save_as)
+            iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
+            cornerRadius = dp(26f)
         }
-        bottom.addView(saveBtn, LinearLayout.LayoutParams(-1, dp(52f)).apply { topMargin = dp(8f) })
+        bottom.addView(saveBtn, LinearLayout.LayoutParams(-1, dp(52f)).apply { topMargin = dp(6f) })
         if (pageCount > MAX_PAGES) bottom.addView(TextView(a).apply {
-            text = "Long document: translating the page you're reading. Whole-document translation works for PDFs of up to $MAX_PAGES pages."
-            textSize = 12f; setTextColor(muted); gravity = Gravity.CENTER; setPadding(0, dp(6f), 0, 0)
+            text = "Long document: only this page is translated. Whole documents can be translated up to $MAX_PAGES pages."
+            textSize = 12f; setTextColor(muted); gravity = Gravity.CENTER; setPadding(dp(8f), dp(8f), dp(8f), 0)
         })
         root.addView(bottom)
 
@@ -180,11 +225,11 @@ object PageTranslate {
         var job: Job? = null
 
         fun labels(det: String?) {
-            fromBtn.text = if (from == AUTO) (det?.let { "${Translator.name(it)} (auto)" } ?: "Detect language") else Translator.name(from)
-            toBtn.text = Translator.name(to)
-            sub.text = (if (pages.size > 1) "Page ${pages[idx] + 1} of $pageCount" else "Page ${pages[idx] + 1}") + " · offline on your phone"
-            prev.isEnabled = idx > 0
-            next.isEnabled = idx < pages.size - 1
+            fromName.text = if (from == AUTO) (det?.let { "${Translator.name(it)} (auto)" } ?: "Detect language") else Translator.name(from)
+            toName.text = Translator.name(to)
+            pagePill.text = if (pages.size > 1) "${idx + 1} / ${pages.size}" else "Page ${pages[idx] + 1}"
+            enable(prev, idx > 0)
+            enable(next, idx < pages.size - 1)
         }
 
         fun busy(msg: String?) {
@@ -202,9 +247,13 @@ object PageTranslate {
             val r = showing ?: return
             val pic = if (showOriginal || r.translated == null) r.src?.bitmap else r.translated
             if (pic != null) image.show(pic)
-            compare.text = if (showOriginal) "Translated" else "Original"
-            compare.isEnabled = r.translated != null
+            setLabel(compare, if (showOriginal) "Translated" else "Original")
+            enable(compare, r.translated != null)
             badge.visibility = if (r.translated != null) View.VISIBLE else View.GONE
+            if (r.translated != null && !showOriginal && hint.tag == null) {
+                hint.tag = true; hint.visibility = View.VISIBLE
+                hint.postDelayed({ hint.visibility = View.GONE }, 4000)
+            }
             badge.text = if (showOriginal) "Original" else "Translated to ${Translator.name(to)}"
             labels(r.from)
         }
@@ -299,8 +348,8 @@ object PageTranslate {
             val src = if (from == AUTO) showing?.from else from
             if (src != null && src != to) { from = to; to = src; Translator.rememberTarget(a, to); changed() }
         }
-        prev.setOnClickListener { if (idx > 0) { idx--; run() } }
-        next.setOnClickListener { if (idx < pages.size - 1) { idx++; run() } }
+        prev?.setOnClickListener { if (idx > 0) { idx--; run() } }
+        next?.setOnClickListener { if (idx < pages.size - 1) { idx++; run() } }
         compare.setOnClickListener { showOriginal = !showOriginal; display() }
         image.onHold = { hold -> if (showing?.translated != null) { showOriginal = hold; display() } }
         textBtn.setOnClickListener { val page = pages[idx]; TranslateSheet.show(a, "Page ${page + 1}") { pageText(page) } }
@@ -378,6 +427,16 @@ object PageTranslate {
         run()
     }
 
+    private fun round(a: Context, color: Int, radiusDp: Float) = android.graphics.drawable.GradientDrawable().apply {
+        cornerRadius = radiusDp * a.resources.displayMetrics.density; setColor(color)
+    }
+
+    private fun tinted(a: Context, res: Int, color: Int, sizeDp: Float) = ContextCompat.getDrawable(a, res)?.mutate()?.apply {
+        setTint(color)
+        val px = (sizeDp * a.resources.displayMetrics.density).toInt()
+        setBounds(0, 0, px, px)
+    }
+
     /** The text of a paragraph as one string (line-end hyphens joined back up). Null if it has no words. */
     private fun blockText(b: TextBlock): String? {
         val sb = StringBuilder()
@@ -400,75 +459,132 @@ object PageTranslate {
             val W = bmp.width.toFloat(); val H = bmp.height.toFloat()
             val c = Canvas(bmp)
             val fill = Paint().apply { style = Paint.Style.FILL }
+            val boxes = blocks.map { b -> b.rect.let { RectF(it.left * W, it.top * H, it.right * W, it.bottom * H) } }
+            // page margins: where the text area of the page ends
+            val textRight = boxes.maxOfOrNull { it.right } ?: W
+            val textBottom = boxes.maxOfOrNull { it.bottom } ?: H
+
             blocks.forEachIndexed { i, b ->
                 val t = out.getOrNull(i)?.trim()
                 if (t.isNullOrEmpty()) return@forEachIndexed
-                val r = b.rect
-                val box = RectF(r.left * W, r.top * H, r.right * W, r.bottom * H)
+                val box = boxes[i]
                 if (box.width() < 2 || box.height() < 2) return@forEachIndexed
-                val lineH = b.lines.map { (it.bottom - it.top) * H }.sorted().let { it[it.size / 2] }.coerceAtLeast(4f)
+                val n = b.lines.size
+                val lineH = b.lines.map { (it.bottom - it.top) * H }.sorted()[n / 2].coerceAtLeast(4f)
                 val pad = max(2f, lineH * 0.14f)
-                val cover = RectF(box.left - pad, box.top - pad, box.right + pad, box.bottom + pad).also {
-                    it.left = max(0f, it.left); it.top = max(0f, it.top); it.right = min(W, it.right); it.bottom = min(H, it.bottom)
-                }
-                val bg = edgeColor(src, cover)
+
+                // free room to the right / below (up to the next paragraph) so text needn't shrink as much
+                val roomRight = min(max(textRight, box.right), boxes.withIndex()
+                    .filter { (j, o) -> j != i && o.left >= box.right - 1 && o.top < box.bottom && o.bottom > box.top }
+                    .minOfOrNull { it.value.left - pad * 2 } ?: (W - pad * 2))
+                val roomBottom = min(max(textBottom, box.bottom) + lineH, boxes.withIndex()
+                    .filter { (j, o) -> j != i && o.top >= box.bottom - 1 && o.left < box.right && o.right > box.left }
+                    .minOfOrNull { it.value.top - pad * 2 } ?: (H - pad * 2))
+
+                val bg = edgeColor(src, RectF(box.left - pad, box.top - pad, box.right + pad, box.bottom + pad))
                 val ink = inkColor(src, box, bg)
 
-                // size, style and alignment of the original
+                // size and style of the original
                 val sizes = b.lines.map { it.sizePt }.filter { it > 0 }.sorted()
                 var base = if (sizes.isNotEmpty()) sizes[sizes.size / 2] / s.wPt * W else lineH * 0.8f
                 base = base.coerceIn(lineH * 0.45f, lineH * 1.25f)
-                val bold = b.lines.count { it.bold } * 2 > b.lines.size
-                val italic = b.lines.count { it.italic } * 2 > b.lines.size
+                val bold = b.lines.count { it.bold } * 2 > n
+                val italic = b.lines.count { it.italic } * 2 > n
                 val family = when (b.lines[0].font) {
                     TextFont.SERIF -> Typeface.SERIF; TextFont.MONO -> Typeface.MONOSPACE; else -> Typeface.SANS_SERIF
                 }
                 val style = when { bold && italic -> Typeface.BOLD_ITALIC; bold -> Typeface.BOLD; italic -> Typeface.ITALIC; else -> Typeface.NORMAL }
                 val tp = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = ink; typeface = Typeface.create(family, style) }
-                val align = alignment(b, W)
-                val n = b.lines.size
-                val pitch = if (n > 1) (b.lines[n - 1].baseline - b.lines[0].baseline) / (n - 1) * H else 0f
-                tp.textSize = base
-                val mult = if (pitch > 0) (pitch / tp.fontSpacing).coerceIn(0.9f, 1.6f) else 1f
-                val width = max(box.width(), base * 2).toInt().coerceAtLeast(1)
 
-                // shrink the text until it fits the paragraph's box
-                var size = base
-                var lay: StaticLayout
-                while (true) {
+                val shape = shape(b, W)
+                val pitch = if (n > 1) (b.lines[n - 1].baseline - b.lines[0].baseline) / (n - 1) * H else 0f
+                val firstBase = b.lines[0].baseline * H
+
+                // width: the paragraph's own; a single line may grow into free room on its right
+                fun widthFor(size: Float): Float {
+                    if (n > 1) return box.width()
                     tp.textSize = size
-                    lay = StaticLayout.Builder.obtain(t, 0, t.length, tp, width)
-                        .setAlignment(align).setLineSpacing(0f, mult).setIncludePad(false).build()
-                    if (lay.height <= cover.height() || size <= base * 0.5f) break
-                    size *= 0.93f
+                    val need = tp.measureText(t) + 2
+                    return when (shape.align) {
+                        Layout.Alignment.ALIGN_CENTER -> min(need, box.width() + 2 * min(roomRight - box.right, box.left - pad)).coerceAtLeast(box.width())
+                        Layout.Alignment.ALIGN_OPPOSITE -> box.width()
+                        else -> min(need, roomRight - box.left).coerceAtLeast(box.width())
+                    }
                 }
-                val y = if (lay.height <= box.height()) box.top + (box.height() - lay.height) / 2 else box.top - pad * 0.5f
+                fun build(size: Float, w: Int): StaticLayout {
+                    tp.textSize = size
+                    val add = if (pitch > 0) (pitch * size / base - tp.fontSpacing).coerceIn(-size * 0.15f, size) else 0f
+                    val text = android.text.SpannableString(t)
+                    if (shape.indent > 0 && n > 1) text.setSpan(android.text.style.LeadingMarginSpan.Standard(shape.indent.toInt(), 0), 0, t.length, 0)
+                    return StaticLayout.Builder.obtain(text, 0, t.length, tp, w)
+                        .setAlignment(shape.align).setLineSpacing(add, 1f).setIncludePad(false)
+                        .setBreakStrategy(Layout.BREAK_STRATEGY_HIGH_QUALITY)
+                        .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NORMAL)
+                        .setJustificationMode(if (shape.justified) Layout.JUSTIFICATION_MODE_INTER_WORD else Layout.JUSTIFICATION_MODE_NONE)
+                        .build()
+                }
+
+                // shrink until it fits the paragraph (plus free room below); keep the original line spacing
+                val maxH = max(box.height() + pad, min(roomBottom - box.top, box.height() * 1.5f + lineH))
+                var size = base
+                var w = widthFor(size)
+                var lay = build(size, w.toInt().coerceAtLeast(1))
+                while (size > base * 0.55f) {
+                    val topGap = firstBase - box.top - lay.getLineBaseline(0)
+                    if (lay.height + max(0f, topGap) <= maxH) break
+                    size *= 0.94f
+                    w = widthFor(size)
+                    lay = build(size, w.toInt().coerceAtLeast(1))
+                }
+
+                // place the first line on the original first baseline
+                val left = when {
+                    n == 1 && shape.align == Layout.Alignment.ALIGN_CENTER -> box.centerX() - w / 2
+                    n == 1 && shape.align == Layout.Alignment.ALIGN_OPPOSITE -> box.right - w
+                    else -> box.left
+                }
+                var y = firstBase - lay.getLineBaseline(0)
+                if (n == 1 && lay.lineCount > 1) y = box.centerY() - lay.height / 2f
+                y = max(y, box.top - pad)
+
                 fill.color = bg
-                c.drawRect(cover.left, cover.top, max(cover.right, box.left + width + pad), max(cover.bottom, y + lay.height + pad), fill)
+                c.drawRect(
+                    max(0f, min(box.left, left) - pad), max(0f, box.top - pad),
+                    min(W, max(box.right, left + w) + pad), min(H, max(box.bottom, y + lay.height) + pad), fill)
                 c.save()
-                c.translate(box.left, y)
+                c.translate(left, y)
                 lay.draw(c)
                 c.restore()
             }
             return bmp
         }
 
-        private fun alignment(b: TextBlock, W: Float): Layout.Alignment {
+        /** How a paragraph is set: alignment, justified or not, first-line indent (px). */
+        private class Shape(val align: Layout.Alignment, val justified: Boolean, val indent: Float)
+
+        private fun shape(b: TextBlock, W: Float): Shape {
             val rects = b.lines.map { it.rect }
+            val tol = max(6f / W, 0.006f)
             if (rects.size == 1) {
                 val r = rects[0]
-                return if (abs(r.centerX() - 0.5f) < 0.03f && r.width() < 0.7f && r.left > 0.15f) Layout.Alignment.ALIGN_CENTER
-                else Layout.Alignment.ALIGN_NORMAL
+                val centred = abs(r.centerX() - 0.5f) < 0.025f && r.width() < 0.7f && r.left > 0.15f
+                return Shape(if (centred) Layout.Alignment.ALIGN_CENTER else Layout.Alignment.ALIGN_NORMAL, false, 0f)
             }
-            val lefts = rects.map { it.left }; val rights = rects.map { it.right }; val centers = rects.map { it.centerX() }
             fun spread(v: List<Float>) = (v.maxOrNull() ?: 0f) - (v.minOrNull() ?: 0f)
-            val tol = 8f / W
-            return when {
-                spread(lefts) <= tol -> Layout.Alignment.ALIGN_NORMAL
-                spread(centers) <= tol * 2 -> Layout.Alignment.ALIGN_CENTER
-                spread(rights) <= tol -> Layout.Alignment.ALIGN_OPPOSITE
+            val rest = rects.drop(1)
+            val minLeft = rects.minOf { it.left }
+            val indent = (rects[0].left - minLeft).takeIf { it > tol && spread(rest.map { it.left }) <= tol } ?: 0f
+            val leftsOk = spread(rects.map { it.left }) <= tol || indent > 0
+            // justified: every line but the last ends at the same right edge (and the last is shorter)
+            val body = rects.dropLast(1)
+            val justified = leftsOk && body.size >= 2 && spread(body.map { it.right }) <= tol && rects.last().right < body.maxOf { it.right } - tol
+            val align = when {
+                leftsOk -> Layout.Alignment.ALIGN_NORMAL
+                spread(rects.map { it.centerX() }) <= tol * 2 -> Layout.Alignment.ALIGN_CENTER
+                spread(rects.map { it.right }) <= tol -> Layout.Alignment.ALIGN_OPPOSITE
                 else -> Layout.Alignment.ALIGN_NORMAL
             }
+            return Shape(align, justified, indent * W)
         }
 
         /** Background colour: the middle colour of the pixels around the box. */
