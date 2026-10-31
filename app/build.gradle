@@ -77,6 +77,8 @@ android {
     packagingOptions {
         jniLibs {
             useLegacyPackaging = false
+            // emulator-only (x86) libraries are never shipped
+            excludes += ['lib/x86/**', 'lib/x86_64/**']
         }
         resources {
             // + post-quantum crypto tables from BouncyCastle (PDF passwords never use them): ~4 MB
