@@ -76,11 +76,12 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     private lateinit var dock: View
     private lateinit var editorRoot: View
     private lateinit var btnExitFull: View
+    private lateinit var btnFullTranslate: View
     private var fullscreen = false
     /** Full screen is applied automatically only when the file is first opened. */
     private var autoFullscreenDone = false
     private var recordedOpen = false
-    private val hideExit = Runnable { fade(btnExitFull, false) }
+    private val hideExit = Runnable { fade(btnExitFull, false); fade(btnFullTranslate, false) }
     private val hidePill = Runnable { if (fullscreen) fade(pagePill, false) }
     private lateinit var fieldEditor: EditText
     /** Field being typed into in place. */
@@ -148,6 +149,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         dock = findViewById(R.id.dock)
         editorRoot = findViewById(R.id.editorRoot)
         btnExitFull = findViewById(R.id.btnExitFull)
+        btnFullTranslate = findViewById(R.id.btnFullTranslate)
         fieldEditor = findViewById(R.id.fieldEditor)
         fieldEditor.setOnEditorActionListener { _, action, _ ->
             if (action == EditorInfo.IME_ACTION_NEXT) { nextField(); true }
@@ -173,6 +175,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         findViewById<View>(R.id.btnRedo).setOnClickListener { redo() }
         findViewById<View>(R.id.btnFullscreen).setOnClickListener { setFullscreen(true) }
         btnExitFull.setOnClickListener { setFullscreen(false) }
+        btnFullTranslate.setOnClickListener { btnExitFull.removeCallbacks(hideExit); hideExit.run(); translatePage() }
         setupFind()
         // keep pages clear of the floating bars and float the controls just above the dock
         val relayoutChrome = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> editorRoot.post { updateChrome() } }
@@ -191,7 +194,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         findViewById<MaterialButton>(R.id.selTranslate).setOnClickListener {
             val text = selText
             doc.clearTextSelection()
-            TranslateSheet.show(this, "Selected text") { text }
+            TranslateSheet.disclaimer(this) { TranslateSheet.show(this, "Selected text") { text } }
         }
         findViewById<MaterialButton>(R.id.selShare).setOnClickListener {
             startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
@@ -1340,6 +1343,11 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
 
     /** Translates the page being read (its own text, or text read from a scan). */
     private fun translatePage() {
+        if (pdf == null) return
+        TranslateSheet.disclaimer(this) { openTranslatedPage() }
+    }
+
+    private fun openTranslatedPage() {
         val p = pdf ?: return
         PageTranslate.show(this, displayName, p.geoms.size, doc.currentPage(),
             load = { page ->
@@ -1631,6 +1639,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
 
     private fun flashExit() {
         fade(btnExitFull, true)
+        fade(btnFullTranslate, true)
         btnExitFull.removeCallbacks(hideExit)
         btnExitFull.postDelayed(hideExit, 2600)
     }
@@ -1668,11 +1677,13 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         fade(pagePill, !on && ready)
         if (on) {
             flashExit()
-            hintOnce("fs_hint2", "Full screen — tap the page, then ⛶ to show the editing tools")
+            hintOnce("fs_hint3", "Full screen — tap the page to show the translate and exit buttons")
         } else {
             btnExitFull.removeCallbacks(hideExit)
             btnExitFull.animate().cancel()
             btnExitFull.visibility = View.GONE
+            btnFullTranslate.animate().cancel()
+            btnFullTranslate.visibility = View.GONE
         }
         updateChrome()
     }
@@ -2138,10 +2149,11 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         val bar = findViewById<LinearLayout>(R.id.tools)
         bar.removeAllViews()
         toolViews.clear()
+        toolButton(bar, "Translate", R.drawable.ic_web) { setTool(ActiveTool.NONE); translatePage() }
+        toolButton(bar, "Edit PDF", R.drawable.ic_edit_doc, beta = true) { enterBeta() }
         toolButton(bar, "Sign", R.drawable.ic_sign) {
             editing { setTool(ActiveTool.NONE); pendingSigWidget = null; pickSignature.launch(SignaturesActivity.intent(this, pick = true)) }
         }
-        toolButton(bar, "Edit PDF", R.drawable.ic_edit_doc, beta = true) { enterBeta() }
         toolButton(bar, "Quick fill", R.drawable.ic_idcard) { editing { setTool(ActiveTool.NONE); quickFillSheet() } }
         toolButton(bar, "Text", R.drawable.ic_text) { editing { setTool(ActiveTool.NONE); textDialog(null) } }
         toolButton(bar, "Draw", R.drawable.ic_draw, ActiveTool.PEN) { editing { setTool(ActiveTool.PEN) } }
@@ -2155,7 +2167,6 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         dockDivider(bar)
         toolButton(bar, "Pages", R.drawable.ic_pages) { setTool(ActiveTool.NONE); openPages() }
         toolButton(bar, "Get text", R.drawable.ic_ocr) { setTool(ActiveTool.NONE); extractText() }
-        toolButton(bar, "Translate", R.drawable.ic_web) { setTool(ActiveTool.NONE); translatePage() }
         toolButton(bar, "Go to", R.drawable.ic_pdf) { pagesSheet() }
         toolButton(bar, "Full screen", R.drawable.ic_fullscreen) { setFullscreen(true) }
         toolButton(bar, "Share", R.drawable.ic_share) { setTool(ActiveTool.NONE); shareCurrent() }
