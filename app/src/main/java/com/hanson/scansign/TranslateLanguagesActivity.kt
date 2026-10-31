@@ -22,9 +22,14 @@ import kotlinx.coroutines.withContext
 /** Translation languages: download the ones you need (about 30 MB each), delete them to free space. */
 class TranslateLanguagesActivity : BaseActivity() {
 
-    private class Row(val lang: Translator.Lang, val button: MaterialButton, val spinner: ProgressBar, val status: TextView)
+    private class Row(val lang: Translator.Lang, val button: MaterialButton, val spinner: ProgressBar, val status: TextView) {
+        val card: View get() = (button.parent as View).parent as View
+    }
 
     private val rows = ArrayList<Row>()
+    private lateinit var list: LinearLayout
+    private lateinit var headReady: TextView
+    private lateinit var headMore: TextView
     private var have: Set<String> = emptySet()
     private val busy = HashSet<String>()
 
@@ -40,7 +45,7 @@ class TranslateLanguagesActivity : BaseActivity() {
             setNavigationOnClickListener { finish() }
         }
         root.addView(toolbar, LinearLayout.LayoutParams(-1, dp(56f)))
-        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16f), dp(4f), dp(16f), dp(24f)) }
+        list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16f), dp(4f), dp(16f), dp(24f)) }
         root.addView(ScrollView(this).apply { addView(list) }, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
         Ui.limitWidth(list, 680)
@@ -69,6 +74,13 @@ class TranslateLanguagesActivity : BaseActivity() {
         intro.addView(introBox)
         list.addView(intro, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(14f) })
 
+        fun header(s: String) = TextView(this).apply {
+            text = s; textSize = 14f; setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setTextColor(ContextCompat.getColor(this@TranslateLanguagesActivity, Themes.accent(this@TranslateLanguagesActivity).primary))
+            setPadding(dp(4f), dp(10f), 0, dp(8f))
+        }
+        headReady = header("On this phone")
+        headMore = header("Available to download")
         for (lang in Translator.all) {
             val card = MaterialCardView(this).apply { radius = 14 * d; cardElevation = 0f; strokeWidth = dp(1f)
                 strokeColor = ContextCompat.getColor(this@TranslateLanguagesActivity, R.color.md_outline) }
@@ -89,11 +101,12 @@ class TranslateLanguagesActivity : BaseActivity() {
             val button = MaterialButton(this).apply { minWidth = dp(112f) }
             row.addView(button, LinearLayout.LayoutParams(-2, dp(44f)))
             card.addView(row)
-            list.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8f) })
+            card.layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8f) }
             val r = Row(lang, button, spinner, status)
             rows.add(r)
             button.setOnClickListener { act(r) }
         }
+        arrange()
         refreshList()
     }
 
@@ -101,6 +114,19 @@ class TranslateLanguagesActivity : BaseActivity() {
         lifecycleScope.launch {
             have = withContext(Dispatchers.IO) { try { Translator.downloaded() } catch (_: Throwable) { setOf("en") } }
             for (r in rows) show(r)
+            arrange()
+        }
+    }
+
+    /** Downloaded languages first ("On this phone"), then the rest. */
+    private fun arrange() {
+        while (list.childCount > 1) list.removeViewAt(1)   // keep the intro card
+        val (ready, more) = rows.partition { it.lang.code in have || it.lang.code in busy }
+        list.addView(headReady)
+        ready.forEach { list.addView(it.card) }
+        if (more.isNotEmpty()) {
+            list.addView(headMore)
+            more.forEach { list.addView(it.card) }
         }
     }
 

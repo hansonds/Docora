@@ -56,7 +56,7 @@ import kotlin.math.sqrt
  */
 object PageTranslate {
 
-    const val MAX_PAGES = 10
+    const val MAX_PAGES = 35
     private const val AUTO = "auto"
 
     /** A page to translate: its picture, its text layout and its size in points. */
@@ -294,13 +294,20 @@ object PageTranslate {
             val (pageLang, own) = withContext(Dispatchers.IO) {
                 if (from != AUTO) Pair(from, texts.map { from })
                 else {
-                    val all = Translator.detect(texts.filterNotNull().joinToString("\n"))
-                    val each = Translator.detectAll(texts.map { t -> t?.takeIf { it.count { c -> c.isLetter() } >= 15 } })
-                    Pair(all, each)
+                    // every paragraph votes for the page's language; longer, surer paragraphs count more
+                    val page = Translator.detectPage(texts)
+                    val each = Translator.guessAll(texts).mapIndexed { k, g ->
+                        val letters = texts[k]?.count { c -> c.isLetter() } ?: 0
+                        // short or unsure paragraphs follow the page
+                        g.code?.takeIf { letters >= 15 && (g.confidence >= 0.5f || letters >= 60) }
+                    }
+                    Pair(page.code, each)
                 }
             }
             val lang: String = pageLang ?: own.filterNotNull().groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
-                ?: return Result(src, null, null, "Couldn't tell which language this page is in — tap the left language button to choose it.")
+                ?: return Result(src, null, null, Translator.unsupportedScript(texts.filterNotNull().joinToString(" "))
+                    ?.let { "$it text can't be translated on the phone yet — Google's offline translator doesn't support it." }
+                    ?: "Couldn't tell which language this page is in — tap the left language button to choose it.")
             // paragraphs in another language are translated from that language (when it's worth a download)
             val longOther = texts.indices.mapNotNull { k ->
                 own[k]?.takeIf { it != lang && it != to && (texts[k]?.count { c -> c.isLetter() } ?: 0) >= 40 }
@@ -388,20 +395,11 @@ object PageTranslate {
             run()
         }
 
-        fun pick(title: String, allowAuto: Boolean, current: String, done: (String) -> Unit) {
-            val list = Translator.all
-            val names = (if (allowAuto) listOf("Detect automatically") else emptyList()) +
-                list.map { it.name + if (it.code in have) "  ✓" else "" }
-            val codes = (if (allowAuto) listOf(AUTO) else emptyList()) + list.map { it.code }
-            MaterialAlertDialogBuilder(a)
-                .setTitle(title)
-                .setSingleChoiceItems(names.map { it as CharSequence }.toTypedArray(), codes.indexOf(current)) { dd, i -> dd.dismiss(); done(codes[i]) }
-                .setNegativeButton("Cancel", null)
-                .show()
-        }
+        fun pick(title: String, allowAuto: Boolean, current: String, done: (String) -> Unit) =
+            TranslateSheet.pickLanguage(a, title, allowAuto, current, have, done)
 
         fromBtn.setOnClickListener { pick("Translate from", true, from) { from = it; changed() } }
-        toBtn.setOnClickListener { pick("Translate to  (✓ = downloaded)", false, to) { to = it; Translator.rememberTarget(a, it); changed() } }
+        toBtn.setOnClickListener { pick("Translate to", false, to) { to = it; Translator.rememberTarget(a, it); changed() } }
         swap.setOnClickListener {
             val src = if (from == AUTO) showing?.from else from
             if (src != null && src != to) { from = to; to = src; Translator.rememberTarget(a, to); changed() }
@@ -429,18 +427,32 @@ object PageTranslate {
             }
         }
 
+        var saving = false
+        val saveLabel = saveBtn.text
         saveBtn.setOnClickListener {
+            if (saving) { job?.cancel(); return@setOnClickListener }   // "Stop"
             job?.cancel()
+            ahead.values.forEach { it.cancel() }; ahead.clear()
             job = a.lifecycleScope.launch {
-                saveBtn.isEnabled = false
+                saving = true
+                saveBtn.text = "Stop"
+                saveBtn.setIconResource(R.drawable.ic_close)
+                // keep the screen on while a long document is translated
+                dlg.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                val started = System.currentTimeMillis()
                 try {
-                    val pd = PDDocument()
+                    // finished pages go to a temporary file instead of memory, so long documents fit on any phone
+                    val pd = PDDocument(PdfOpener.memory())
                     var translatedAny = false
                     try {
                         for ((n, page) in pages.withIndex()) {
-                            val tag = if (pages.size > 1) "Page ${n + 1} of ${pages.size}: " else ""
-                            busy("${tag}reading…")
-                            val r = translate(page, true) { busy(tag + it.replaceFirstChar { c -> c.lowercase() }) }
+                            val left = if (n == 0) "" else {
+                                val sec = ((System.currentTimeMillis() - started) / n * (pages.size - n) / 1000).toInt()
+                                if (sec < 60) " · less than a minute left" else " · about ${(sec + 30) / 60} min left"
+                            }
+                            val tag = if (pages.size > 1) "Page ${n + 1} of ${pages.size}$left\n" else ""
+                            busy("${tag}Reading the page…")
+                            val r = translate(page, true) { busy(tag + it) }
                             if (r.note != null && r.note.contains("isn't downloaded")) { busy(null); note(r.note); return@launch }
                             val src = r.src ?: continue
                             val pic = r.translated ?: src.bitmap
@@ -471,11 +483,14 @@ object PageTranslate {
                         try { pd.close() } catch (_: Throwable) {}
                     }
                 } catch (e: Throwable) {
-                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    if (e is kotlinx.coroutines.CancellationException) { busy(null); note("Stopped. Nothing was saved."); throw e }
                     busy(null)
                     note("Couldn't save the PDF. Please try again.")
                 } finally {
-                    saveBtn.isEnabled = true
+                    saving = false
+                    saveBtn.text = saveLabel
+                    saveBtn.setIconResource(R.drawable.ic_save_as)
+                    dlg.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 }
             }
         }
