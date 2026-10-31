@@ -123,7 +123,11 @@ object Translator {
                 else {
                     val lead = p.takeWhile { it.isWhitespace() }
                     val trail = p.takeLastWhile { it.isWhitespace() }
-                    lead + Tasks.await(c.translate(p.trim())) + trail
+                    // keep bullets and list numbers ("•", "1.", "(a)") exactly as they are
+                    val body = p.trim()
+                    val mark = BULLET.find(body)?.value.orEmpty()
+                    val rest = body.substring(mark.length)
+                    lead + mark + (if (rest.none { it.isLetter() }) rest else Tasks.await(c.translate(rest))) + trail
                 }
             }
             var out = run(prep.text)
@@ -174,6 +178,34 @@ object Translator {
             }
             return sb.toString()
         }
+    }
+
+    private val BULLET = Regex("^(?:[•●○◦▪▫■□‣⁃∙·*\\-–—]|\\(?\\d{1,3}[.)]|\\(?[a-zA-Z][.)]|[ivxIVX]{1,4}[.)])\\s+")
+
+    /**
+     * Joins the line breaks that only come from the page's width (copied or extracted PDF text)
+     * back into whole sentences, which translate much better. Paragraphs, list items and short
+     * lines (headings, addresses) keep their own lines.
+     */
+    fun reflow(text: String): String {
+        val lines = text.replace("\r\n", "\n").replace('\r', '\n').split('\n')
+        if (lines.size < 2) return text
+        val width = lines.map { it.trim().length }.sorted().let { it[(it.size * 3) / 4] }
+        val sb = StringBuilder()
+        var prev = ""
+        for (raw in lines) {
+            val line = raw.trim()
+            when {
+                sb.isEmpty() -> sb.append(line)
+                line.isEmpty() || prev.isEmpty() -> sb.append('\n').append(line)
+                BULLET.containsMatchIn(line) -> sb.append('\n').append(line)
+                prev.endsWith("-") && line[0].isLowerCase() -> { sb.setLength(sb.length - 1); sb.append(line) }
+                prev.length < width * 0.6f || prev.last() in ".!?:;।。" -> sb.append('\n').append(line)
+                else -> sb.append(' ').append(line)
+            }
+            prev = line
+        }
+        return sb.toString()
     }
 
     /** Splits text into sentences (at most ~400 characters each), keeping all spaces and line breaks. */

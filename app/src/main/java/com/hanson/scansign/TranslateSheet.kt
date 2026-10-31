@@ -243,7 +243,7 @@ object TranslateSheet {
         note.text = "Reading the text…"
         sheet.show()
         job = a.lifecycleScope.launch {
-            source = try { loadText().trim() } catch (_: Throwable) { "" }
+            source = try { Translator.reflow(loadText()).trim() } catch (_: Throwable) { "" }
             val (det, models) = withContext(Dispatchers.IO) {
                 Pair(if (source.isBlank()) null else Translator.detect(source),
                     try { Translator.downloaded() } catch (_: Throwable) { setOf("en") })

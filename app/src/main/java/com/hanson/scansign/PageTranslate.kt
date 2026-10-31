@@ -499,15 +499,28 @@ object PageTranslate {
         setBounds(0, 0, px, px)
     }
 
-    /** The text of a paragraph as one string (line-end hyphens joined back up). Null if it has no words. */
+    private val ITEM = Regex("^(?:[•●○◦▪■□‣⁃∙·*\\-–—]|\\(?\\d{1,3}[.)]|\\(?[a-zA-Z][.)])\\s")
+
+    /**
+     * The text of a paragraph: wrapped lines joined into sentences (hyphens joined back up), but
+     * list items and short lines (headings, addresses, table rows) keep their own line.
+     * Null if it has no words.
+     */
     private fun blockText(b: TextBlock): String? {
         val sb = StringBuilder()
+        val full = b.rect.width()
+        var prevShort = false
         for (l in b.lines) {
             val t = l.text.trim()
             if (t.isEmpty()) continue
-            if (sb.endsWith("-") && t[0].isLowerCase()) sb.setLength(sb.length - 1)
-            else if (sb.isNotEmpty()) sb.append(' ')
+            when {
+                sb.isEmpty() -> {}
+                ITEM.containsMatchIn(t) || prevShort -> sb.append('\n')
+                sb.endsWith("-") && t[0].isLowerCase() -> sb.setLength(sb.length - 1)
+                else -> sb.append(' ')
+            }
             sb.append(t)
+            prevShort = b.lines.size > 1 && l.rect.width() < full * 0.6f
         }
         return if (sb.count { it.isLetter() } >= 2) sb.toString() else null
     }

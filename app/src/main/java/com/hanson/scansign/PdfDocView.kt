@@ -69,7 +69,6 @@ class PdfDocView @JvmOverloads constructor(
     private val selFill = Paint().apply { color = Color.argb(70, 36, 87, 245) }
     private val selHandle = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(36, 87, 245) }
 
-    fun hasPageWords(page: Int) = pageWords.containsKey(page)
     fun pageWords(page: Int): List<Word>? = pageWords[page]
 
     // ---- Edit PDF (beta) ----

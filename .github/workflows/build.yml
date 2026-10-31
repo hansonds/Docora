@@ -51,7 +51,8 @@ jobs:
       - name: Rename APK
         run: |
           mkdir -p out
-          cp app/build/outputs/apk/release/*.apk out/Docora.apk
+          cp app/build/outputs/apk/release/*arm64-v8a*.apk out/Docora.apk
+          cp app/build/outputs/apk/release/*universal*.apk out/Docora-all-phones.apk
           cp app/build/outputs/bundle/release/*.aab out/Docora-playstore.aab
 
       - name: Check 16 KB page-size support
@@ -80,4 +81,5 @@ jobs:
           make_latest: true
           files: |
             out/Docora.apk
+            out/Docora-all-phones.apk
             out/Docora-playstore.aab
