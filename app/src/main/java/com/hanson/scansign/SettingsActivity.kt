@@ -80,9 +80,13 @@ class SettingsActivity : BaseActivity() {
             Triple(R.id.secAppearance, R.drawable.ic_night, IconTiles.Hue.VIOLET),
             Triple(R.id.secViewer, R.drawable.ic_pdf, IconTiles.Hue.BLUE),
             Triple(R.id.secScanner, R.drawable.ic_camera, IconTiles.Hue.TEAL),
-            Triple(R.id.secOcr, R.drawable.ic_ocr, IconTiles.Hue.ORANGE)
+            Triple(R.id.secOcr, R.drawable.ic_ocr, IconTiles.Hue.ORANGE),
+            Triple(R.id.secTranslate, R.drawable.ic_web, IconTiles.Hue.CYAN)
         )) findViewById<TextView>(id).setCompoundDrawablesRelativeWithIntrinsicBounds(IconTiles.badge(this, icon, hue), null, null, null)
 
+        findViewById<android.view.View>(R.id.btnLanguages).setOnClickListener {
+            startActivity(android.content.Intent(this, TranslateLanguagesActivity::class.java))
+        }
         val searchable = findViewById<MaterialSwitch>(R.id.searchable)
         searchable.isChecked = Settings.searchableDefault(this)
         searchable.setOnCheckedChangeListener { _, on -> prefs.edit().putBoolean(Settings.SEARCHABLE, on).apply() }

@@ -96,6 +96,14 @@
                 android:layout_height="44dp"
                 android:text="Share"
                 android:textColor="#FFFFFF" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/selTranslate"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="44dp"
+                android:text="Translate"
+                android:textColor="#FFFFFF" />
         </LinearLayout>
 
         <!-- page counter: tap to jump to a page -->

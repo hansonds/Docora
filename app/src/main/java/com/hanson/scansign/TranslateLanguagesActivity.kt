@@ -1,0 +1,144 @@
+package com.hanson.scansign
+
+import android.os.Bundle
+import android.view.Gravity
+import android.view.View
+import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.widget.ScrollView
+import android.widget.TextView
+import android.widget.Toast
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
+import com.google.android.material.appbar.MaterialToolbar
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.card.MaterialCardView
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.materialswitch.MaterialSwitch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+/** Translation languages: download the ones you need (about 30 MB each), delete them to free space. */
+class TranslateLanguagesActivity : BaseActivity() {
+
+    private class Row(val lang: Translator.Lang, val button: MaterialButton, val spinner: ProgressBar, val status: TextView)
+
+    private val rows = ArrayList<Row>()
+    private var have: Set<String> = emptySet()
+    private val busy = HashSet<String>()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val d = resources.displayMetrics.density
+        fun dp(v: Float) = (v * d).toInt()
+
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val toolbar = MaterialToolbar(this).apply {
+            title = "Translation languages"
+            setNavigationIcon(R.drawable.ic_back)
+            setNavigationOnClickListener { finish() }
+        }
+        root.addView(toolbar, LinearLayout.LayoutParams(-1, dp(56f)))
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16f), dp(4f), dp(16f), dp(24f)) }
+        root.addView(ScrollView(this).apply { addView(list) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(root)
+        Ui.limitWidth(list, 680)
+
+        // intro card
+        val intro = MaterialCardView(this).apply { radius = 18 * d }
+        val introBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16f), dp(14f), dp(16f), dp(10f)) }
+        introBox.addView(TextView(this).apply {
+            text = "Translate on your phone"
+            textSize = 17f; setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setCompoundDrawablesRelativeWithIntrinsicBounds(IconTiles.badge(this@TranslateLanguagesActivity, R.drawable.ic_web, IconTiles.Hue.CYAN), null, null, null)
+            compoundDrawablePadding = dp(12f)
+            gravity = Gravity.CENTER_VERTICAL
+        })
+        introBox.addView(TextView(this).apply {
+            text = "Download the languages you need — about ${Translator.MODEL_MB} MB each, once. After that, translation works offline and your text never leaves the phone. English is always included."
+            textSize = 13.5f
+            setTextColor(ContextCompat.getColor(this@TranslateLanguagesActivity, R.color.md_on_surface_variant))
+            setPadding(0, dp(8f), 0, 0)
+        })
+        introBox.addView(MaterialSwitch(this).apply {
+            text = "Download only on Wi-Fi"
+            isChecked = Translator.wifiOnly(this@TranslateLanguagesActivity)
+            setOnCheckedChangeListener { _, on -> Translator.setWifiOnly(this@TranslateLanguagesActivity, on) }
+        })
+        intro.addView(introBox)
+        list.addView(intro, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(14f) })
+
+        for (lang in Translator.all) {
+            val card = MaterialCardView(this).apply { radius = 14 * d; cardElevation = 0f; strokeWidth = dp(1f)
+                strokeColor = ContextCompat.getColor(this@TranslateLanguagesActivity, R.color.md_outline) }
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(14f), dp(8f), dp(8f), dp(8f)); minimumHeight = dp(60f)
+            }
+            val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            texts.addView(TextView(this).apply { text = lang.name; textSize = 16f; setTypeface(typeface, android.graphics.Typeface.BOLD) })
+            val status = TextView(this).apply {
+                textSize = 12.5f
+                setTextColor(ContextCompat.getColor(this@TranslateLanguagesActivity, R.color.md_on_surface_variant))
+            }
+            texts.addView(status)
+            row.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
+            val spinner = ProgressBar(this).apply { visibility = View.GONE }
+            row.addView(spinner, LinearLayout.LayoutParams(dp(26f), dp(26f)).apply { marginEnd = dp(10f) })
+            val button = MaterialButton(this).apply { minWidth = dp(112f) }
+            row.addView(button, LinearLayout.LayoutParams(-2, dp(44f)))
+            card.addView(row)
+            list.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8f) })
+            val r = Row(lang, button, spinner, status)
+            rows.add(r)
+            button.setOnClickListener { act(r) }
+        }
+        refreshList()
+    }
+
+    private fun refreshList() {
+        lifecycleScope.launch {
+            have = withContext(Dispatchers.IO) { try { Translator.downloaded() } catch (_: Throwable) { setOf("en") } }
+            for (r in rows) show(r)
+        }
+    }
+
+    private fun show(r: Row) {
+        val code = r.lang.code
+        val loading = code in busy
+        r.spinner.visibility = if (loading) View.VISIBLE else View.GONE
+        r.button.isEnabled = !loading && !Translator.builtIn(code)
+        when {
+            Translator.builtIn(code) -> { r.status.text = "Always included"; r.button.text = "Included" }
+            loading -> { r.status.text = "Downloading…"; r.button.text = "Wait" }
+            code in have -> { r.status.text = "✓ Downloaded · works offline"; r.button.text = "Delete" }
+            else -> { r.status.text = "About ${Translator.MODEL_MB} MB"; r.button.text = "Download" }
+        }
+    }
+
+    private fun act(r: Row) {
+        val code = r.lang.code
+        if (code in have) {
+            MaterialAlertDialogBuilder(this)
+                .setTitle("Delete ${r.lang.name}?")
+                .setMessage("Frees about ${Translator.MODEL_MB} MB. You can download it again any time.")
+                .setPositiveButton("Delete") { _, _ -> run(r) { Translator.delete(code) } }
+                .setNegativeButton("Cancel", null)
+                .show()
+        } else run(r) { Translator.download(this, code) }
+    }
+
+    private fun run(r: Row, work: () -> Unit) {
+        busy.add(r.lang.code)
+        show(r)
+        lifecycleScope.launch {
+            val ok = withContext(Dispatchers.IO) { try { work(); true } catch (_: Throwable) { false } }
+            busy.remove(r.lang.code)
+            if (!ok) Toast.makeText(this@TranslateLanguagesActivity,
+                if (Translator.wifiOnly(this@TranslateLanguagesActivity)) "Couldn't download — connect to Wi-Fi, or turn off \"Wi-Fi only\""
+                else "Couldn't finish — check your internet connection", Toast.LENGTH_LONG).show()
+            refreshList()
+        }
+    }
+}
