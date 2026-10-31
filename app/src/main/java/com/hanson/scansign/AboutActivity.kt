@@ -62,7 +62,7 @@ class AboutActivity : BaseActivity() {
         Section(IconTiles.Hue.CYAN, R.drawable.ic_web, "Translate", listOf(
             "Translate selected text or a whole page into 59 languages",
             "See the page translated in place — same layout, colours and size",
-            "Save the translation as a new PDF (documents up to 10 pages)",
+            "Save the translation as a new PDF (documents up to 35 pages)",
             "Detects the language by itself — works on scanned pages too",
             "Download only the languages you need (about 30 MB each), then it works offline",
             "Copy or share the translation"

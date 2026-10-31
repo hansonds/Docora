@@ -75,6 +75,24 @@ object TranslateSheet {
             .show()
     }
 
+    /**
+     * Language list: "Detect automatically", then the downloaded languages (✓, ready offline),
+     * then the rest with their download size.
+     */
+    fun pickLanguage(a: Context, title: String, allowAuto: Boolean, current: String, have: Set<String>, done: (String) -> Unit) {
+        val (ready, rest) = Translator.all.partition { it.code in have }
+        val names = ArrayList<CharSequence>()
+        val codes = ArrayList<String>()
+        if (allowAuto) { names.add("Detect automatically"); codes.add(AUTO) }
+        for (l in ready) { names.add("✓  ${l.name}"); codes.add(l.code) }
+        for (l in rest) { names.add("${l.name}   · ${Translator.MODEL_MB} MB"); codes.add(l.code) }
+        MaterialAlertDialogBuilder(a)
+            .setTitle(title)
+            .setSingleChoiceItems(names.toTypedArray(), codes.indexOf(current)) { dlg, i -> dlg.dismiss(); done(codes[i]) }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     fun show(a: AppCompatActivity, what: String, loadText: suspend () -> String) {
         val d = a.resources.displayMetrics.density
         fun dp(v: Float) = (v * d).toInt()
@@ -95,6 +113,7 @@ object TranslateSheet {
         // from ⇄ to
         var from = AUTO
         var detected: String? = null
+        var sure = 1f
         var to = Translator.defaultTarget(a)
         val langs = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val fromBtn = outlined(a)
@@ -143,7 +162,7 @@ object TranslateSheet {
         var have: Set<String> = setOf("en")
 
         fun labels() {
-            fromBtn.text = if (from == AUTO) (detected?.let { "${Translator.name(it)} (auto)" } ?: "Detect language") else Translator.name(from)
+            fromBtn.text = if (from == AUTO) (detected?.let { "${Translator.name(it)} (auto${if (sure < 0.45f) "?" else ""})" } ?: "Detect language") else Translator.name(from)
             toBtn.text = Translator.name(to)
         }
 
@@ -154,7 +173,8 @@ object TranslateSheet {
             if (source.isBlank()) { note.visibility = View.VISIBLE; note.text = "No text found here."; return }
             if (src == null) {
                 note.visibility = View.VISIBLE
-                note.text = "Couldn't tell which language this is — tap the left button to choose it."
+                note.text = Translator.unsupportedScript(source)?.let { "$it text can't be translated on the phone yet — Google's offline translator doesn't support it." }
+                    ?: "Couldn't tell which language this is — tap the left button to choose it."
                 scroll.visibility = View.GONE; actions.visibility = View.GONE; downloadBtn.visibility = View.GONE
                 return
             }
@@ -208,20 +228,11 @@ object TranslateSheet {
             }
         }
 
-        fun pick(title: String, allowAuto: Boolean, current: String, done: (String) -> Unit) {
-            val list = Translator.all
-            val names = (if (allowAuto) listOf("Detect automatically") else emptyList()) +
-                list.map { it.name + if (it.code in have) "  ✓" else "" }
-            val codes = (if (allowAuto) listOf(AUTO) else emptyList()) + list.map { it.code }
-            MaterialAlertDialogBuilder(a)
-                .setTitle(title)
-                .setSingleChoiceItems(names.map { it as CharSequence }.toTypedArray(), codes.indexOf(current)) { dlg, i -> dlg.dismiss(); done(codes[i]) }
-                .setNegativeButton("Cancel", null)
-                .show()
-        }
+        fun pick(title: String, allowAuto: Boolean, current: String, done: (String) -> Unit) =
+            pickLanguage(a, title, allowAuto, current, have, done)
 
         fromBtn.setOnClickListener { pick("Translate from", true, from) { from = it; run() } }
-        toBtn.setOnClickListener { pick("Translate to  (✓ = downloaded)", false, to) { to = it; Translator.rememberTarget(a, it); run() } }
+        toBtn.setOnClickListener { pick("Translate to", false, to) { to = it; Translator.rememberTarget(a, it); run() } }
         swap.setOnClickListener {
             val src = if (from == AUTO) detected else from
             if (src != null) { from = to; to = src; Translator.rememberTarget(a, to); run() }
@@ -245,7 +256,7 @@ object TranslateSheet {
         job = a.lifecycleScope.launch {
             source = try { Translator.reflow(loadText()).trim() } catch (_: Throwable) { "" }
             val (det, models) = withContext(Dispatchers.IO) {
-                Pair(if (source.isBlank()) null else Translator.detect(source),
+                Pair(if (source.isBlank()) null else Translator.detectPage(source.split('\n')).also { sure = it.confidence }.code,
                     try { Translator.downloaded() } catch (_: Throwable) { setOf("en") })
             }
             detected = det

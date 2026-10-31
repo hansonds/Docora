@@ -32,7 +32,7 @@
 - Translate selected text or a whole page into **59 languages**, on your phone
 - **Translated page view**: the translation is drawn right on the page, matching the original layout, colours and text size, like a camera translator. Hold the page to compare with the original
 - Detects the language of each paragraph by itself, and works on scanned pages
-- Save the translated document as a **new PDF** (documents up to 10 pages; longer ones translate the page you're reading)
+- Save the translated document as a **new PDF** (documents up to 35 pages; longer ones translate the page you're reading)
 - Download only the languages you need (about 30 MB each, once), then everything works offline. Wi-Fi-only option, and delete languages any time
 - Also available from full-screen reading with a small button
 

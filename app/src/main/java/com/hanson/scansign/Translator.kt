@@ -5,6 +5,7 @@ import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.common.model.DownloadConditions
 import com.google.mlkit.common.model.RemoteModelManager
 import com.google.mlkit.nl.languageid.LanguageIdentification
+import com.google.mlkit.nl.languageid.LanguageIdentificationOptions
 import com.google.mlkit.nl.translate.TranslateLanguage
 import com.google.mlkit.nl.translate.TranslateRemoteModel
 import com.google.mlkit.nl.translate.Translation
@@ -69,23 +70,128 @@ object Translator {
         Tasks.await(RemoteModelManager.getInstance().deleteDownloadedModel(TranslateRemoteModel.Builder(code).build()))
     }
 
-    /** Which supported language [text] is written in, or null if unsure / not translatable. */
-    fun detect(text: String): String? = detectAll(listOf(text)).firstOrNull()
+    /** A detected language ([code] = null when unsure) and how sure the detector is (0..1). */
+    class Guess(val code: String?, val confidence: Float)
 
-    /** Language of each text (null = unsure). One detector for all. */
-    fun detectAll(texts: List<String?>): List<String?> {
-        val client = LanguageIdentification.getClient()
+    /** Which supported language [text] is written in, or null if unsure / not translatable. */
+    fun detect(text: String): String? = detectPage(text.split('\n')).code
+
+    /** Language of each text (null = unsure). */
+    fun detectAll(texts: List<String?>): List<String?> = guessAll(texts).map { it.code }
+
+    /**
+     * Language of each text, from the detector's candidates checked against the writing system
+     * actually used (so Devanagari is never taken for English, Cyrillic for Spanish, …).
+     */
+    fun guessAll(texts: List<String?>): List<Guess> {
+        val client = LanguageIdentification.getClient(LanguageIdentificationOptions.Builder().setConfidenceThreshold(0.05f).build())
         try {
             return texts.map { t ->
-                if (t.isNullOrBlank()) null
-                else try {
-                    val tag = Tasks.await(client.identifyLanguage(t.take(1500)))
-                    if (tag == "und") null else TranslateLanguage.fromLanguageTag(tag)
-                } catch (_: Throwable) { null }
+                if (t.isNullOrBlank() || t.count { it.isLetter() } < 2) return@map Guess(null, 0f)
+                val script = Scripts.of(t)
+                val cands = try {
+                    Tasks.await(client.identifyPossibleLanguages(t.take(2000)))
+                        .mapNotNull { c ->
+                            val tag = c.languageTag
+                            if (tag == "und" || tag.endsWith("-Latn")) null   // romanised Hindi etc. can't be translated
+                            else TranslateLanguage.fromLanguageTag(tag)?.let { Guess(it, c.confidence) }
+                        }
+                } catch (_: Throwable) { emptyList() }
+                val fits = cands.filter { Scripts.fits(it.code!!, script) }
+                fits.maxByOrNull { it.confidence }
+                    ?: Scripts.defaultFor(script)?.let { Guess(it, 0.6f) }
+                    ?: Guess(null, 0f)
             }
         } finally {
             client.close()
         }
+    }
+
+    /**
+     * Language of a whole page or selection: every paragraph votes, weighted by its length and how
+     * sure the detector is (better than detecting one long mixed text).
+     */
+    fun detectPage(texts: List<String?>): Guess {
+        val guesses = guessAll(texts)
+        val votes = HashMap<String, Float>()
+        var total = 0f
+        texts.forEachIndexed { i, t ->
+            val g = guesses[i]
+            val w = (t?.count { it.isLetter() } ?: 0).toFloat()
+            total += w
+            if (g.code != null) votes[g.code] = (votes[g.code] ?: 0f) + w * g.confidence
+        }
+        val best = votes.maxByOrNull { it.value } ?: return Guess(null, 0f)
+        return Guess(best.key, if (total > 0) (best.value / total).coerceIn(0f, 1f) else 0f)
+    }
+
+    /** Name of the language of [text] when its writing system can't be translated on the phone (e.g. Malayalam), else null. */
+    fun unsupportedScript(text: String): String? = Scripts.unsupportedName(Scripts.of(text))
+
+    /** Writing systems: which languages can be written in each. */
+    private object Scripts {
+        private val sets: Map<Character.UnicodeScript, List<String>> = mapOf(
+            Character.UnicodeScript.DEVANAGARI to listOf("hi", "mr"),
+            Character.UnicodeScript.BENGALI to listOf("bn"),
+            Character.UnicodeScript.GUJARATI to listOf("gu"),
+            Character.UnicodeScript.TAMIL to listOf("ta"),
+            Character.UnicodeScript.TELUGU to listOf("te"),
+            Character.UnicodeScript.KANNADA to listOf("kn"),
+            Character.UnicodeScript.ARABIC to listOf("ar", "fa", "ur"),
+            Character.UnicodeScript.HEBREW to listOf("he"),
+            Character.UnicodeScript.CYRILLIC to listOf("ru", "uk", "be", "bg", "mk"),
+            Character.UnicodeScript.GREEK to listOf("el"),
+            Character.UnicodeScript.THAI to listOf("th"),
+            Character.UnicodeScript.HANGUL to listOf("ko"),
+            Character.UnicodeScript.HIRAGANA to listOf("ja"),
+            Character.UnicodeScript.KATAKANA to listOf("ja"),
+            Character.UnicodeScript.HAN to listOf("zh", "ja"),
+            Character.UnicodeScript.GEORGIAN to listOf("ka")
+        )
+        private val unsupported = mapOf(
+            Character.UnicodeScript.MALAYALAM to "Malayalam",
+            Character.UnicodeScript.GURMUKHI to "Punjabi",
+            Character.UnicodeScript.ORIYA to "Odia",
+            Character.UnicodeScript.SINHALA to "Sinhala",
+            Character.UnicodeScript.MYANMAR to "Burmese",
+            Character.UnicodeScript.KHMER to "Khmer",
+            Character.UnicodeScript.ETHIOPIC to "Amharic",
+            Character.UnicodeScript.LAO to "Lao",
+            Character.UnicodeScript.ARMENIAN to "Armenian",
+            Character.UnicodeScript.TIBETAN to "Tibetan"
+        )
+        private val nonLatin: Set<String> = sets.values.flatten().toSet()
+
+        /** The main writing system of the text's letters. Kana anywhere means Japanese. */
+        fun of(t: String): Character.UnicodeScript {
+            val count = HashMap<Character.UnicodeScript, Int>()
+            var i = 0
+            while (i < t.length) {
+                val cp = t.codePointAt(i)
+                if (Character.isLetter(cp)) {
+                    val sc = try { Character.UnicodeScript.of(cp) } catch (_: Throwable) { Character.UnicodeScript.UNKNOWN }
+                    count[sc] = (count[sc] ?: 0) + 1
+                }
+                i += Character.charCount(cp)
+            }
+            val kana = (count[Character.UnicodeScript.HIRAGANA] ?: 0) + (count[Character.UnicodeScript.KATAKANA] ?: 0)
+            if (kana > 0 && kana * 10 >= count.values.sum()) return Character.UnicodeScript.HIRAGANA
+            return count.maxByOrNull { it.value }?.key ?: Character.UnicodeScript.UNKNOWN
+        }
+
+        fun fits(code: String, sc: Character.UnicodeScript): Boolean = when (sc) {
+            Character.UnicodeScript.LATIN -> code !in nonLatin
+            Character.UnicodeScript.HIRAGANA, Character.UnicodeScript.KATAKANA -> code == "ja"
+            in sets -> code in sets.getValue(sc)
+            else -> true
+        }
+
+        fun defaultFor(sc: Character.UnicodeScript): String? = when (sc) {
+            Character.UnicodeScript.HIRAGANA, Character.UnicodeScript.KATAKANA -> "ja"
+            else -> sets[sc]?.firstOrNull()
+        }?.let { TranslateLanguage.fromLanguageTag(it) }
+
+        fun unsupportedName(sc: Character.UnicodeScript): String? = unsupported[sc]
     }
 
     /**
