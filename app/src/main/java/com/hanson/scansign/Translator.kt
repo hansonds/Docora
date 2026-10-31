@@ -70,72 +70,128 @@ object Translator {
     }
 
     /** Which supported language [text] is written in, or null if unsure / not translatable. */
-    fun detect(text: String): String? {
+    fun detect(text: String): String? = detectAll(listOf(text)).firstOrNull()
+
+    /** Language of each text (null = unsure). One detector for all. */
+    fun detectAll(texts: List<String?>): List<String?> {
         val client = LanguageIdentification.getClient()
-        return try {
-            val tag = Tasks.await(client.identifyLanguage(text.take(1500)))
-            if (tag == "und") null else TranslateLanguage.fromLanguageTag(tag)
-        } catch (_: Throwable) {
-            null
+        try {
+            return texts.map { t ->
+                if (t.isNullOrBlank()) null
+                else try {
+                    val tag = Tasks.await(client.identifyLanguage(t.take(1500)))
+                    if (tag == "und") null else TranslateLanguage.fromLanguageTag(tag)
+                } catch (_: Throwable) { null }
+            }
         } finally {
             client.close()
         }
     }
 
     /**
-     * Translates [text] from [from] to [to], paragraph by paragraph (long texts are split so each
-     * piece stays small). The languages must already be downloaded.
+     * Translates [text] from [from] to [to], sentence by sentence (short pieces are translated
+     * more completely). The languages must already be downloaded.
      */
-    fun translate(text: String, from: String, to: String, progress: ((Int, Int) -> Unit)? = null): String {
-        if (from == to) return text
-        val client = Translation.getClient(TranslatorOptions.Builder().setSourceLanguage(from).setTargetLanguage(to).build())
-        try {
-            val chunks = chunks(text)
-            val out = StringBuilder()
-            chunks.forEachIndexed { i, c ->
-                if (c.isBlank()) out.append(c)
-                else out.append(Tasks.await(client.translate(c)))
-                progress?.invoke(i + 1, chunks.size)
+    fun translate(text: String, from: String, to: String, progress: ((Int, Int) -> Unit)? = null): String =
+        Session().use { it.translate(text, from, to) }
+
+    /** Translates many texts (null entries stay null). */
+    fun translateAll(texts: List<String?>, from: String, to: String): List<String?> =
+        Session().use { s -> texts.map { t -> if (t.isNullOrBlank()) null else s.translate(t, from, to) } }
+
+    /**
+     * Keeps translators open between calls and remembers what was already translated, so paging
+     * through a document is fast. Close it when done.
+     */
+    class Session : java.io.Closeable {
+        private val clients = HashMap<String, com.google.mlkit.nl.translate.Translator>()
+        private val memo = HashMap<String, String>()
+
+        @Synchronized
+        private fun client(from: String, to: String) = clients.getOrPut("$from>$to") {
+            Translation.getClient(TranslatorOptions.Builder().setSourceLanguage(from).setTargetLanguage(to).build())
+        }
+
+        fun translate(text: String, from: String, to: String): String {
+            if (from == to || text.isBlank()) return text
+            val key = "$from>$to>$text"
+            synchronized(memo) { memo[key] }?.let { return it }
+            val c = client(from, to)
+            val prep = Case.prepare(text)
+            fun run(src: String) = pieces(src).joinToString("") { p ->
+                if (p.isBlank() || p.none { it.isLetter() }) p
+                else {
+                    val lead = p.takeWhile { it.isWhitespace() }
+                    val trail = p.takeLastWhile { it.isWhitespace() }
+                    lead + Tasks.await(c.translate(p.trim())) + trail
+                }
             }
-            return out.toString()
-        } finally {
-            client.close()
+            var out = run(prep.text)
+            // came back unchanged (often names-like words): try again in lower case
+            if (out.trim().equals(prep.text.trim(), ignoreCase = true) && prep.text.any { it.isUpperCase() }) {
+                val again = run(prep.text.lowercase())
+                if (!again.trim().equals(prep.text.trim(), ignoreCase = true)) out = again
+            }
+            out = prep.restore(out)
+            synchronized(memo) { if (memo.size > 4000) memo.clear(); memo[key] = out }
+            return out
+        }
+
+        @Synchronized
+        override fun close() {
+            for (c in clients.values) try { c.close() } catch (_: Throwable) {}
+            clients.clear()
         }
     }
 
-    /** Translates many short texts with one client (null entries are skipped and stay null). */
-    fun translateAll(texts: List<String?>, from: String, to: String): List<String?> {
-        if (from == to) return texts
-        val client = Translation.getClient(TranslatorOptions.Builder().setSourceLanguage(from).setTargetLanguage(to).build())
-        try {
-            return texts.map { t ->
-                if (t.isNullOrBlank()) null
-                else chunks(t).joinToString("") { c -> if (c.isBlank()) c else Tasks.await(client.translate(c)) }
+    /**
+     * The translator leaves ALL-CAPS and Title-Case words alone (it takes them for names), so
+     * such text is translated in sentence case and turned back into capitals afterwards.
+     */
+    private object Case {
+        class Prepared(val text: String, private val upper: Boolean) {
+            fun restore(s: String) = if (upper) s.uppercase() else s
+        }
+
+        fun prepare(t: String): Prepared {
+            val cased = t.filter { it.isUpperCase() || it.isLowerCase() }
+            if (cased.length < 4) return Prepared(t, false)
+            val ups = cased.count { it.isUpperCase() }
+            if (ups >= cased.length * 0.8f) return Prepared(sentence(t.lowercase()), true)
+            val words = t.split(Regex("\\s+")).filter { it.length >= 3 && it[0].isLetter() }
+            if (words.size >= 3 && words.count { it[0].isUpperCase() } >= words.size * 0.75f && ups < cased.length * 0.5f)
+                return Prepared(sentence(t.lowercase()), false)
+            return Prepared(t, false)
+        }
+
+        private fun sentence(s: String): String {
+            val sb = StringBuilder(s)
+            var cap = true
+            for (i in sb.indices) {
+                val ch = sb[i]
+                if (cap && ch.isLetter()) { sb.setCharAt(i, ch.uppercaseChar()); cap = false }
+                else if (ch == '.' || ch == '!' || ch == '?' || ch == '\n') cap = true
             }
-        } finally {
-            client.close()
+            return sb.toString()
         }
     }
 
-    /** Splits text into pieces of at most ~1500 characters at paragraph / sentence ends, keeping line breaks. */
-    private fun chunks(text: String): List<String> {
+    /** Splits text into sentences (at most ~400 characters each), keeping all spaces and line breaks. */
+    private fun pieces(text: String): List<String> {
         val out = ArrayList<String>()
-        for (para in text.split(Regex("(?<=\n)"))) {
-            if (para.length <= 1500) { out.add(para); continue }
-            var rest = para
-            while (rest.length > 1500) {
-                val cut = rest.lastIndexOfAny(charArrayOf('.', '!', '?', ';', ','), 1500).takeIf { it > 300 } ?: 1500
-                out.add(rest.substring(0, cut + 1))
-                rest = rest.substring(cut + 1)
+        val sb = StringBuilder()
+        var i = 0
+        while (i < text.length) {
+            val ch = text[i]
+            sb.append(ch)
+            val end = (ch == '.' || ch == '!' || ch == '?' || ch == '\u0964' || ch == '\u3002' || ch == ';') &&
+                (i + 1 >= text.length || text[i + 1].isWhitespace())
+            if (ch == '\n' || (end && sb.length >= 25) || (sb.length >= 400 && ch.isWhitespace())) {
+                out.add(sb.toString()); sb.setLength(0)
             }
-            if (rest.isNotEmpty()) out.add(rest)
+            i++
         }
-        // join small neighbours so there are fewer calls
-        val merged = ArrayList<String>()
-        for (c in out) {
-            if (merged.isNotEmpty() && merged.last().length + c.length <= 1500) merged[merged.size - 1] = merged.last() + c
-            else merged.add(c)
-        }
-        return merged
+        if (sb.isNotEmpty()) out.add(sb.toString())
+        return out
     }
 }

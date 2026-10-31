@@ -50,6 +50,31 @@ object TranslateSheet {
         stateListAnimator = null
     }
 
+    /** Shown every time before translating: what machine translation can and can't do. */
+    fun disclaimer(a: AppCompatActivity, go: () -> Unit) {
+        val d = a.resources.displayMetrics.density
+        val muted = ContextCompat.getColor(a, R.color.md_on_surface_variant)
+        val box = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; setPadding((24 * d).toInt(), (8 * d).toInt(), (24 * d).toInt(), 0) }
+        val points = listOf(
+            "Machine translation can be wrong or miss words. For legal, medical or official papers, have a person check it.",
+            "Names, numbers, codes and some special terms are kept as they are.",
+            "The translated page is a picture: fonts, colours and layout are matched as closely as possible, not exactly.",
+            "Text inside photos, logos, stamps or handwriting may not be translated. Scanned pages depend on how clearly the text is read.",
+            "Each language is a one-time download (about ${Translator.MODEL_MB} MB). After that it works offline — your text never leaves your phone.",
+            "Saving makes a new PDF (documents up to ${PageTranslate.MAX_PAGES} pages). Your original file is never changed."
+        )
+        for (p in points) box.addView(TextView(a).apply {
+            text = "•  $p"; textSize = 14f; setTextColor(muted); setLineSpacing(0f, 1.15f)
+            setPadding(0, (5 * d).toInt(), 0, (5 * d).toInt())
+        })
+        MaterialAlertDialogBuilder(a)
+            .setTitle("Before you translate")
+            .setView(ScrollView(a).apply { addView(box) })
+            .setPositiveButton("Translate") { _, _ -> go() }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     fun show(a: AppCompatActivity, what: String, loadText: suspend () -> String) {
         val d = a.resources.displayMetrics.density
         fun dp(v: Float) = (v * d).toInt()

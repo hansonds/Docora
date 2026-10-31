@@ -37,6 +37,7 @@ import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
 import com.tom_roush.pdfbox.pdmodel.graphics.image.JPEGFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -223,6 +224,8 @@ object PageTranslate {
         var showing: Result? = null
         var showOriginal = false
         var job: Job? = null
+        val ahead = HashMap<Int, kotlinx.coroutines.Deferred<Result?>>()
+        val session = Translator.Session()
 
         fun labels(det: String?) {
             fromName.text = if (from == AUTO) (det?.let { "${Translator.name(it)} (auto)" } ?: "Detect language") else Translator.name(from)
@@ -270,9 +273,13 @@ object PageTranslate {
                 .show()
         }
 
-        /** Translates one page and paints the translation onto its picture. */
-        suspend fun translate(page: Int, progress: (String) -> Unit): Result {
-            cache[page]?.let { return it }
+        /**
+         * Translates one page and paints the translation onto its picture. Each paragraph's own
+         * language is detected, so mixed-language pages are translated completely.
+         * Not [interactive] (reading ahead): never asks to download, just gives up.
+         */
+        suspend fun translate(page: Int, interactive: Boolean, progress: (String) -> Unit): Result {
+            synchronized(cache) { cache[page] }?.let { return it }
             progress("Reading the page…")
             val src = try { load(page) } catch (e: Throwable) { if (e is kotlinx.coroutines.CancellationException) throw e; null }
                 ?: return Result(null, null, null, "Couldn't open this page.")
@@ -283,28 +290,74 @@ object PageTranslate {
                 have = withContext(Dispatchers.IO) { try { Translator.downloaded() } catch (_: Throwable) { setOf("en") } }
                 haveLoaded = true
             }
-            val lang = (if (from == AUTO) withContext(Dispatchers.IO) { Translator.detect(texts.filterNotNull().joinToString("\n")) } else from)
+            // language of the page, and of each longer paragraph
+            val (pageLang, own) = withContext(Dispatchers.IO) {
+                if (from != AUTO) Pair(from, texts.map { from })
+                else {
+                    val all = Translator.detect(texts.filterNotNull().joinToString("\n"))
+                    val each = Translator.detectAll(texts.map { t -> t?.takeIf { it.count { c -> c.isLetter() } >= 15 } })
+                    Pair(all, each)
+                }
+            }
+            val lang: String = pageLang ?: own.filterNotNull().groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
                 ?: return Result(src, null, null, "Couldn't tell which language this page is in — tap the left language button to choose it.")
-            if (lang == to) return Result(src, null, lang, "This page is already in ${Translator.name(to)}.")
-            val missing = listOf(lang, to).filter { it !in have }.distinct()
+            // paragraphs in another language are translated from that language (when it's worth a download)
+            val longOther = texts.indices.mapNotNull { k ->
+                own[k]?.takeIf { it != lang && it != to && (texts[k]?.count { c -> c.isLetter() } ?: 0) >= 40 }
+            }.toSet()
+            val missing = (listOf(lang, to) + longOther).filter { it !in have }.distinct()
+                .filter { it == lang || it == to || interactive }
+            if (lang == to && longOther.isEmpty()) return Result(src, null, lang, "This page is already in ${Translator.name(to)}.")
             if (missing.isNotEmpty()) {
-                if (!askDownload(missing)) return Result(src, null, lang, "${missing.joinToString(" and ") { Translator.name(it) }} isn't downloaded yet.")
-                progress("Downloading ${missing.joinToString(" and ") { Translator.name(it) }}…")
-                val ok = withContext(Dispatchers.IO) { try { missing.forEach { Translator.download(a, it) }; true } catch (_: Throwable) { false } }
-                if (!ok) return Result(src, null, lang,
-                    if (Translator.wifiOnly(a)) "Couldn't download — connect to Wi-Fi, or turn off \"Wi-Fi only\" in Manage languages."
-                    else "Couldn't download — check your internet connection and try again.")
-                have = have + missing
+                if (!interactive) return Result(src, null, lang, null)
+                if (!askDownload(missing)) {
+                    if (lang in missing || to in missing)
+                        return Result(src, null, lang, "${missing.joinToString(" and ") { Translator.name(it) }} isn't downloaded yet.")
+                } else {
+                    progress("Downloading ${missing.joinToString(" and ") { Translator.name(it) }}…")
+                    val ok = withContext(Dispatchers.IO) { try { missing.forEach { Translator.download(a, it) }; true } catch (_: Throwable) { false } }
+                    if (!ok && (lang in missing || to in missing)) return Result(src, null, lang,
+                        if (Translator.wifiOnly(a)) "Couldn't download — connect to Wi-Fi, or turn off \"Wi-Fi only\" in Manage languages."
+                        else "Couldn't download — check your internet connection and try again.")
+                    if (ok) have = have + missing
+                }
+            }
+            val langs = texts.indices.map { k ->
+                val o = own[k]
+                when {
+                    texts[k] == null -> null
+                    o != null && o == to && (texts[k]?.count { c -> c.isLetter() } ?: 0) >= 15 -> null   // already in the target language
+                    o != null && o in have -> o
+                    else -> lang
+                }
             }
             progress("Translating ${Translator.name(lang)} → ${Translator.name(to)}…")
             val out = withContext(Dispatchers.IO) {
-                try { Translator.translateAll(texts, lang, to) } catch (e: Throwable) { if (e is kotlinx.coroutines.CancellationException) throw e; null }
+                try {
+                    texts.indices.map { k ->
+                        val t = texts[k]; val l = langs[k]
+                        if (t == null || l == null || l == to) null else session.translate(t, l, to)
+                    }
+                } catch (e: Throwable) { if (e is kotlinx.coroutines.CancellationException) throw e; null }
             } ?: return Result(src, null, lang, "Couldn't translate this page. Please try again.")
+            if (out.all { it == null }) return Result(src, null, lang, "This page is already in ${Translator.name(to)}.")
             val painted = withContext(Dispatchers.Default) { Painter.paint(src, blocks, out) }
             val r = Result(src, painted, lang, null)
-            cache[page] = r
-            while (cache.size > 3) cache.remove(cache.keys.first())
+            synchronized(cache) {
+                cache[page] = r
+                while (cache.size > 4) cache.remove(cache.keys.first())
+            }
             return r
+        }
+
+        /** Reads ahead: translates the next page in the background while this one is read. */
+        fun prefetch() {
+            if (idx + 1 >= pages.size) return
+            val page = pages[idx + 1]
+            if (synchronized(cache) { cache.containsKey(page) } || ahead.containsKey(page)) return
+            ahead[page] = a.lifecycleScope.async {
+                try { translate(page, false) {} } catch (e: Throwable) { if (e is kotlinx.coroutines.CancellationException) throw e; null }
+            }
         }
 
         fun run() {
@@ -314,7 +367,8 @@ object PageTranslate {
             val page = pages[idx]
             job = a.lifecycleScope.launch {
                 busy("Reading the page…")
-                val r = translate(page) { busy(it) }
+                val early = ahead.remove(page)?.let { d -> busy("Translating…"); try { d.await() } catch (e: Throwable) { if (e is kotlinx.coroutines.CancellationException) throw e; null } }
+                val r = early?.takeIf { it.translated != null } ?: translate(page, true) { busy(it) }
                 showing = r
                 busy(null)
                 display()
@@ -324,11 +378,15 @@ object PageTranslate {
                         busyAction.visibility = View.VISIBLE; busyAction.text = "Download"
                         busyAction.setOnClickListener { run() }
                     }
-                }
+                } else prefetch()
             }
         }
 
-        fun changed() { cache.clear(); run() }
+        fun changed() {
+            ahead.values.forEach { it.cancel() }; ahead.clear()
+            synchronized(cache) { cache.clear() }
+            run()
+        }
 
         fun pick(title: String, allowAuto: Boolean, current: String, done: (String) -> Unit) {
             val list = Translator.all
@@ -382,7 +440,7 @@ object PageTranslate {
                         for ((n, page) in pages.withIndex()) {
                             val tag = if (pages.size > 1) "Page ${n + 1} of ${pages.size}: " else ""
                             busy("${tag}reading…")
-                            val r = translate(page) { busy(tag + it.replaceFirstChar { c -> c.lowercase() }) }
+                            val r = translate(page, true) { busy(tag + it.replaceFirstChar { c -> c.lowercase() }) }
                             if (r.note != null && r.note.contains("isn't downloaded")) { busy(null); note(r.note); return@launch }
                             val src = r.src ?: continue
                             val pic = r.translated ?: src.bitmap
@@ -422,7 +480,11 @@ object PageTranslate {
             }
         }
 
-        dlg.setOnDismissListener { job?.cancel() }
+        dlg.setOnDismissListener {
+            job?.cancel()
+            ahead.values.forEach { it.cancel() }; ahead.clear()
+            Thread { session.close() }.start()
+        }
         dlg.show()
         run()
     }
