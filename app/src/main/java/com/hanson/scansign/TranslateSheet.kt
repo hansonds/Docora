@@ -57,7 +57,7 @@ object TranslateSheet {
         val b = MaterialAlertDialogBuilder(a)
             .setTitle(title)
             .setMessage(p?.message ?: "Couldn't finish — check your internet connection and try again.")
-            .setNegativeButton("Close", null)
+            .setNegativeButton("More fixes") { _, _ -> showRemedies(a) }
         if (retry != null) b.setPositiveButton("Try again") { _, _ -> retry() }
         val fix = p?.fix
         if (fix != null) b.setNeutralButton(p.fixLabel) { _, _ ->
@@ -66,6 +66,32 @@ object TranslateSheet {
             }
         }
         b.show()
+    }
+
+    /** "Download not working?": everything worth trying, most helpful first. */
+    fun showRemedies(a: Context) {
+        val d = a.resources.displayMetrics.density
+        val muted = ContextCompat.getColor(a, R.color.md_on_surface_variant)
+        val box = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; setPadding((24 * d).toInt(), (8 * d).toInt(), (24 * d).toInt(), 0) }
+        Translator.REMEDIES.forEachIndexed { i, p ->
+            box.addView(TextView(a).apply {
+                text = "${i + 1}.  $p"; textSize = 14f; setTextColor(muted); setLineSpacing(0f, 1.15f)
+                setPadding(0, (5 * d).toInt(), 0, (5 * d).toInt())
+            })
+        }
+        MaterialAlertDialogBuilder(a)
+            .setTitle("Language won't download?")
+            .setView(ScrollView(a).apply { addView(box) })
+            .setPositiveButton("Close", null)
+            .setNeutralButton("Open Download Manager") { _, _ ->
+                try {
+                    a.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        android.net.Uri.parse("package:com.android.providers.downloads")))
+                } catch (_: Throwable) {
+                    try { a.startActivity(android.content.Intent(android.provider.Settings.ACTION_SETTINGS)) } catch (_: Throwable) {}
+                }
+            }
+            .show()
     }
 
     /** Shown every time before translating: what machine translation can and can't do. */
