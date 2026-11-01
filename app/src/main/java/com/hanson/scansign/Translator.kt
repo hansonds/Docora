@@ -60,6 +60,23 @@ object Translator {
         return models.map { it.language }.toSet() + TranslateLanguage.ENGLISH
     }
 
+    /** How to clear the phone's Download Manager — the fix that most often helps when downloads stay waiting. */
+    const val CLEAR_DM = "Settings › Apps › ⋮ (or filter) › Show system apps › Download Manager › Storage › Clear data (Clear storage), then restart the phone"
+
+    /** Everything worth trying when a language won't download, most helpful first. */
+    val REMEDIES = listOf(
+        "Clear the Download Manager: $CLEAR_DM. This removes stuck downloads; your files stay.",
+        "Use normal Wi-Fi from a router instead of mobile data or another phone's hotspot. Or open the Wi-Fi's settings and set \"Metered network\" to \"Treat as unmetered\".",
+        "Restart the phone, open Docora straight away and try again.",
+        "Make sure Download Manager is switched on (same place in Settings › Apps).",
+        "Docora's battery use: Settings › Apps › Docora › Battery › Unrestricted. Also check Settings › Battery › Background usage limits: Docora must not be a sleeping app.",
+        "Turn off Data saver and Battery saver for a moment (or allow Docora in them).",
+        "Turn off VPN, ad-blocker apps and Private DNS for a moment — some block Google downloads.",
+        "Free up storage: each language needs about 100 MB free while it installs.",
+        "Set the date and time to automatic — a wrong clock makes secure downloads fail.",
+        "Try another network (other Wi-Fi or mobile data) — some office, school and hotel networks block downloads."
+    )
+
     /** A download that can't go on, with the reason in plain words (shown to the user). */
     class DownloadProblem(message: String, val fix: android.content.Intent? = null, val fixLabel: String = "Open settings") : Exception(message)
 
@@ -172,11 +189,12 @@ object Translator {
                 android.content.Intent(android.provider.Settings.ACTION_BATTERY_SAVER_SETTINGS), "Battery saver settings")
         // the phone's Download Manager: does it run any download for Docora?
         val test = downloadManagerTest(ctx)
+        val clear = "$CLEAR_DM"
         details = details.replace("\n\nDetails: ", "\n\nDetails: $test · ")
         if (test == "test pending" || test == "test error")
             return DownloadProblem("The phone's Download Manager isn't running any downloads for Docora right now (even a tiny test file stayed waiting). " +
-                "This is a known problem on some phones with Android 16: restart the phone, open Docora straight away and try again. " +
-                "If it keeps happening, open Download Manager in Settings › Apps (show system apps) › Storage › Clear cache, and restart again.$details",
+                "This usually happens when old downloads are stuck in its list. Fix: $clear, then try again. " +
+                "(This only clears the download list — your files stay.)$details",
                 android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:$DM_PACKAGE")),
                 "Open Download Manager")
         // 6. a metered connection (mobile data, or Wi-Fi from a phone hotspot): some phones keep big downloads queued
@@ -187,7 +205,7 @@ object Translator {
                 android.content.Intent(android.provider.Settings.ACTION_WIFI_SETTINGS), "Open Wi-Fi settings")
         // 7. small downloads work, the large language file doesn't start
         return DownloadProblem("Small downloads work, but the phone's Download Manager is holding back the large language file (about 30 MB). " +
-            "Restart the phone and try again. If it still waits, open Download Manager in Settings › Apps (show system apps) › Storage › Clear cache.$details",
+            "Fix: $clear, then try again. (This only clears the download list — your files stay.)$details",
             android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:$DM_PACKAGE")),
             "Open Download Manager")
     }
@@ -247,6 +265,12 @@ object Translator {
                 "Turn it on (Settings › Apps › Download Manager › Enable), then try again.",
             android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:$DM_PACKAGE")),
             "Open Download Manager")
+        // the zip and its unpacked files need room (about 30 + 40 MB, plus a margin)
+        val free = try { ctx.noBackupFilesDir.usableSpace } catch (_: Throwable) { Long.MAX_VALUE }
+        if (free < 100L * 1024 * 1024) throw DownloadProblem(
+            "Not enough free storage: a language needs about 100 MB while it installs, and only ${mb(free)} MB is free. " +
+                "Delete some photos, videos or apps, then try again.",
+            android.content.Intent(android.provider.Settings.ACTION_INTERNAL_STORAGE_SETTINGS), "Open storage")
         // leftovers from earlier tries (also older app versions) can block new downloads: clear them first
         if (active.get() == 0) cancelStuck(ctx)
         active.incrementAndGet()

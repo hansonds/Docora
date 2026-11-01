@@ -70,6 +70,10 @@ class TranslateLanguagesActivity : BaseActivity() {
             isChecked = Translator.wifiOnly(this@TranslateLanguagesActivity)
             setOnCheckedChangeListener { _, on -> Translator.setWifiOnly(this@TranslateLanguagesActivity, on) }
         })
+        introBox.addView(TranslateSheet.plain(this).apply {
+            text = "Download not working?"
+            setOnClickListener { TranslateSheet.showRemedies(this@TranslateLanguagesActivity) }
+        }, LinearLayout.LayoutParams(-2, -2))
         intro.addView(introBox)
         list.addView(intro, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(14f) })
 
