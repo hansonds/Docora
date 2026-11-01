@@ -74,11 +74,19 @@ object Translator {
      * one, and gives the setting that fixes it. [dl] = what the Download Manager said.
      */
     private fun diagnose(ctx: Context, dl: String): DownloadProblem {
-        val details = "\n\nDetails: $dl · Android ${android.os.Build.VERSION.RELEASE} · ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"
         val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
         val net = try { cm?.activeNetwork } catch (_: Throwable) { null }
         val caps = try { net?.let { cm?.getNetworkCapabilities(it) } } catch (_: Throwable) { null }
         val link = try { net?.let { cm?.getLinkProperties(it) } } catch (_: Throwable) { null }
+        val kind = when {
+            caps == null -> "offline"
+            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
+            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> "mobile data"
+            else -> "other network"
+        } + (if (caps != null && !caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED)) " (metered)" else "") +
+            (if (caps?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN) == true) " + VPN" else "") +
+            ((if (android.os.Build.VERSION.SDK_INT >= 28) link?.privateDnsServerName else null)?.let { " · DNS $it" } ?: "")
+        val details = "\n\nDetails: $dl · $kind · Android ${android.os.Build.VERSION.RELEASE} · ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"
         // 1. no internet at all
         if (caps == null || !caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET))
             return DownloadProblem("Your phone isn't connected to the internet right now. Connect to Wi-Fi or mobile data and try again.$details",
@@ -123,7 +131,13 @@ object Translator {
         if (pm?.isPowerSaveMode == true)
             return DownloadProblem("Battery saver is on, which can pause downloads. Turn it off for a moment, then try again.$details",
                 android.content.Intent(android.provider.Settings.ACTION_BATTERY_SAVER_SETTINGS), "Battery saver settings")
-        // 6. the Download Manager itself is stuck
+        // 6. a metered connection (mobile data, or Wi-Fi from a phone hotspot): some phones keep big downloads queued
+        if (metered)
+            return DownloadProblem("This connection counts as metered (mobile data, or Wi-Fi from a phone's hotspot), and this phone keeps " +
+                "large downloads waiting on metered connections. Connect to a normal Wi-Fi router, or open this Wi-Fi's settings and set " +
+                "\"Metered network\" to \"Treat as unmetered\", then try again.$details",
+                android.content.Intent(android.provider.Settings.ACTION_WIFI_SETTINGS), "Open Wi-Fi settings")
+        // 7. the Download Manager itself is stuck
         return DownloadProblem("The phone's Download Manager isn't starting the download. Restart the phone and try again. " +
             "If it still waits, open Download Manager in Settings › Apps (show system apps) › Storage › Clear cache.$details",
             android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:$DM_PACKAGE")),
