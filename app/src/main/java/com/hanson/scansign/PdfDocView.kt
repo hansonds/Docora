@@ -10,6 +10,7 @@ import android.graphics.Color
 import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.PointF
+import android.graphics.Rect
 import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
@@ -24,6 +25,7 @@ import android.widget.OverScroller
 import androidx.core.content.ContextCompat
 import kotlin.math.hypot
 import kotlin.math.max
+import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
 
@@ -327,11 +329,44 @@ class PdfDocView @JvmOverloads constructor(
     @Volatile private var wantFirst = 0
     @Volatile private var wantLast = 0
 
-    private class Tile(val page: Int, val doc: RectF, val bmp: Bitmap)
-    private val tiles = HashMap<Int, Tile>()
+    // ---- sharp zoom: the page is cut into 512 px tiles rendered at fixed zoom steps, kept in a
+    // cache and drawn over the (softer) whole-page picture. Tiles around the screen are rendered
+    // ahead, so scrolling while zoomed stays sharp.
+    private val tilePx = 512
+    private val levels = floatArrayOf(1.25f, 1.5f, 1.75f, 2f, 2.5f, 3f, 3.5f, 4f, 5f, 6f)
+    private val tileCache = object : LruCache<Long, Bitmap>((maxBytes * 3 / 4).coerceAtLeast(32 * 1024 * 1024)) {
+        override fun sizeOf(key: Long, value: Bitmap) = value.byteCount
+    }
+    private val tilePending = HashSet<Long>()
+    /** Tiles wanted right now (read on the render thread to skip stale ones). */
+    @Volatile private var tileWanted: Set<Long> = emptySet()
     @Volatile private var tileGen = 0
     private val handler = Handler(Looper.getMainLooper())
     private val tileRunnable = Runnable { requestTiles() }
+
+    /** Zoom step used for tiles: the first step at or above the zoom (renders slightly sharper than needed). */
+    private fun levelFor(z: Float): Int {
+        for (k in levels.indices) if (levels[k] >= z * 0.97f) return k
+        return levels.size - 1
+    }
+
+    private fun tileKey(page: Int, lvl: Int, tx: Int, ty: Int): Long =
+        (page.toLong() shl 32) or (lvl.toLong() shl 28) or (tx.toLong() shl 14) or ty.toLong()
+
+    /** Where a tile sits on the page, in document units (screen px at zoom 1). */
+    private fun tileDocRect(page: Int, lvl: Int, tx: Int, ty: Int): RectF {
+        val l = levels[lvl]
+        val left = hMargin + tx * tilePx / l
+        val top = pageTop[page] + ty * tilePx / l
+        return RectF(left, top, min(left + tilePx / l, hMargin + contentW), min(top + tilePx / l, pageTop[page] + pageH[page]))
+    }
+
+    private fun clearTiles() {
+        tileGen++
+        tileWanted = emptySet()
+        tilePending.clear()
+        tileCache.evictAll()
+    }
 
     private val sigCache = HashMap<String, Bitmap>()
 
@@ -469,7 +504,7 @@ class PdfDocView @JvmOverloads constructor(
         this.widgetsByPage = widgets.groupBy { it.page }
         this.items = items
         baseCache.evictAll()
-        tiles.clear()
+        clearTiles()
         relayout()
         invalidate()
     }
@@ -539,7 +574,7 @@ class PdfDocView @JvmOverloads constructor(
     fun release() {
         handler.removeCallbacksAndMessages(null)
         baseCache.evictAll()
-        tiles.clear()
+        clearTiles()
     }
 
     // ======================= layout =======================
@@ -557,7 +592,7 @@ class PdfDocView @JvmOverloads constructor(
         relayout()
         if (keepPage > 0) goToPage(keepPage)
         baseCache.evictAll()
-        tiles.clear()
+        clearTiles()
     }
 
     /** Where a form field is on screen right now. */
@@ -639,9 +674,9 @@ class PdfDocView @JvmOverloads constructor(
 
     private fun onViewportChanged() {
         scrollbarVisibleUntil = System.currentTimeMillis() + 1500
+        // while scrolling: ask for tiles straight away (cached ones are reused); while pinching: wait a moment
         handler.removeCallbacks(tileRunnable)
-        handler.postDelayed(tileRunnable, 180)
-        tileGen++
+        if (scaleDetector.isInProgress || zoomAnimator?.isRunning == true) handler.postDelayed(tileRunnable, 120) else handler.post(tileRunnable)
         invalidate()
         listener?.onViewportChanged()
     }
@@ -709,13 +744,7 @@ class PdfDocView @JvmOverloads constructor(
                 canvas.drawText("Page ${i + 1}", r.centerX(), r.centerY(), placeholderText)
                 requestBase(i)
             }
-            tiles[i]?.let { t ->
-                val dst = RectF(
-                    t.doc.left * zoom - scrollXf, t.doc.top * zoom - scrollYf,
-                    t.doc.right * zoom - scrollXf, t.doc.bottom * zoom - scrollYf
-                )
-                canvas.drawBitmap(t.bmp, null, dst, bmpPaint)
-            }
+            if (zoom >= 1.15f) drawTiles(canvas, i, r)
             drawPickOutlines(canvas, i, r)
             drawWidgets(canvas, i, r)
             drawItems(canvas, i, r)
@@ -724,8 +753,6 @@ class PdfDocView @JvmOverloads constructor(
         // prefetch neighbours
         if (range.last + 1 < geoms.size) requestBase(range.last + 1)
         if (range.first - 1 >= 0) requestBase(range.first - 1)
-        // drop tiles that scrolled away
-        tiles.keys.retainAll { it in range }
 
         drawSelection(canvas)
         drawTextSelection(canvas)
@@ -751,34 +778,92 @@ class PdfDocView @JvmOverloads constructor(
         }
     }
 
+    /** Tile index range of a page that covers [view] (screen px), at zoom step [lvl]. */
+    private fun tileSpan(page: Int, lvl: Int, view: RectF): IntArray? {
+        val pr = pageScreenRect(page)
+        val vis = RectF(pr)
+        if (!vis.intersect(view)) return null
+        val px = levels[lvl] / zoom          // tile-bitmap px per screen px
+        val maxTx = ((contentW * levels[lvl]) / tilePx).toInt()
+        val maxTy = ((pageH[page] * levels[lvl]) / tilePx).toInt()
+        return intArrayOf(
+            ((vis.left - pr.left) * px / tilePx).toInt().coerceIn(0, maxTx),
+            ((vis.top - pr.top) * px / tilePx).toInt().coerceIn(0, maxTy),
+            ((vis.right - pr.left) * px / tilePx).toInt().coerceIn(0, maxTx),
+            ((vis.bottom - pr.top) * px / tilePx).toInt().coerceIn(0, maxTy)
+        )
+    }
+
+    /** Draws the sharp tiles of a page: this zoom step first, falling back to tiles of other steps. */
+    private fun drawTiles(canvas: Canvas, page: Int, pr: RectF) {
+        val view = RectF(0f, 0f, width.toFloat(), height.toFloat())
+        val want = levelFor(zoom)
+        // nearby steps that may still be cached (e.g. just after zooming), drawn under the right one
+        val order = (levels.indices).sortedBy { k -> if (k == want) 100 else -abs(k - want) }
+        for (lvl in order) {
+            val s = tileSpan(page, lvl, view) ?: return
+            for (ty in s[1]..s[3]) for (tx in s[0]..s[2]) {
+                val b = tileCache.get(tileKey(page, lvl, tx, ty)) ?: continue
+                val d = tileDocRect(page, lvl, tx, ty)
+                val dst = RectF(d.left * zoom - scrollXf, d.top * zoom - scrollYf, d.right * zoom - scrollXf, d.bottom * zoom - scrollYf)
+                val src = Rect(0, 0, ((d.width()) * levels[lvl]).roundToInt().coerceIn(1, b.width), ((d.height()) * levels[lvl]).roundToInt().coerceIn(1, b.height))
+                canvas.drawBitmap(b, src, dst, bmpPaint)
+            }
+        }
+    }
+
     private fun requestTiles() {
         val r = renderer ?: return
-        if (zoom < 1.15f || width == 0) {
-            if (tiles.isNotEmpty()) { tiles.clear(); invalidate() }
+        if (zoom < 1.15f || width == 0 || pageTop.isEmpty()) {
+            tileWanted = emptySet()
             return
         }
+        val lvl = levelFor(zoom)
+        val scale0 = levels[lvl]
+        // the screen plus a margin of about one tile all round, so scrolling finds tiles ready
+        val m = tilePx * zoom / scale0
+        val view = RectF(-m, -m, width + m, height + m)
+        val cx = width / 2f; val cy = height / 2f
+        val need = ArrayList<Triple<Long, Float, IntArray>>()
+        for (i in visibleRangeFor(view)) {
+            val s = tileSpan(i, lvl, view) ?: continue
+            for (ty in s[1]..s[3]) for (tx in s[0]..s[2]) {
+                val key = tileKey(i, lvl, tx, ty)
+                val d = tileDocRect(i, lvl, tx, ty)
+                val dx = d.centerX() * zoom - scrollXf - cx
+                val dy = d.centerY() * zoom - scrollYf - cy
+                need.add(Triple(key, dx * dx + dy * dy, intArrayOf(i, tx, ty)))
+            }
+        }
+        tileWanted = need.mapTo(HashSet()) { it.first }
+        tilePending.retainAll(tileWanted)
         val gen = tileGen
-        val view = RectF(0f, 0f, width.toFloat(), height.toFloat())
-        for (i in visibleRange()) {
-            val pr = pageScreenRect(i)
-            val vis = RectF(pr)
-            if (!vis.intersect(view)) continue
-            val scale = pxPerPt(i)
-            val left = (vis.left - pr.left).roundToInt()
-            val top = (vis.top - pr.top).roundToInt()
-            val w = vis.width().roundToInt()
-            val h = vis.height().roundToInt()
-            val docRect = RectF(
-                (vis.left + scrollXf) / zoom, (vis.top + scrollYf) / zoom,
-                (vis.right + scrollXf) / zoom, (vis.bottom + scrollYf) / zoom
-            )
-            r.renderRegion(i, scale, left, top, w, h, stillWanted = { gen == tileGen }) { bmp ->
+        // nearest to the middle of the screen first
+        for ((key, _, p) in need.sortedBy { it.second }) {
+            if (tileCache.get(key) != null || !tilePending.add(key)) continue
+            val page = p[0]; val tx = p[1]; val ty = p[2]
+            val scale = contentW * scale0 / geoms[page].dispW    // bitmap px per PDF point
+            val d = tileDocRect(page, lvl, tx, ty)
+            val w = (d.width() * scale0).roundToInt().coerceAtLeast(1)
+            val h = (d.height() * scale0).roundToInt().coerceAtLeast(1)
+            r.renderRegion(page, scale, tx * tilePx, ty * tilePx, w, h, stillWanted = { gen == tileGen && key in tileWanted }) { bmp ->
+                tilePending.remove(key)
                 if (bmp != null && gen == tileGen) {
-                    tiles[i] = Tile(i, docRect, bmp)
+                    tileCache.put(key, bmp)
                     invalidate()
                 }
             }
         }
+    }
+
+    /** Pages touching [view] (screen px, may reach beyond the screen). */
+    private fun visibleRangeFor(view: RectF): IntRange {
+        if (geoms.isEmpty() || pageTop.isEmpty()) return IntRange.EMPTY
+        val first = pageAtDocY(((scrollYf + view.top) / zoom).coerceAtLeast(0f))
+        var last = first
+        val bottomDoc = (scrollYf + view.bottom) / zoom
+        while (last + 1 < geoms.size && pageTop[last + 1] <= bottomDoc) last++
+        return first..last
     }
 
     private fun widgetRect(w: FormWidget, pr: RectF) = RectF(
