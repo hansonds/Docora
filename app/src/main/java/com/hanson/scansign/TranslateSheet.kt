@@ -51,6 +51,23 @@ object TranslateSheet {
         stateListAnimator = null
     }
 
+    /** Explains why a language didn't download, with a button to the setting that fixes it. */
+    fun showProblem(a: Context, title: String, e: Throwable?, retry: (() -> Unit)? = null) {
+        val p = e as? Translator.DownloadProblem
+        val b = MaterialAlertDialogBuilder(a)
+            .setTitle(title)
+            .setMessage(p?.message ?: "Couldn't finish — check your internet connection and try again.")
+            .setNegativeButton("Close", null)
+        if (retry != null) b.setPositiveButton("Try again") { _, _ -> retry() }
+        val fix = p?.fix
+        if (fix != null) b.setNeutralButton(p.fixLabel) { _, _ ->
+            try { a.startActivity(fix) } catch (_: Throwable) {
+                try { a.startActivity(android.content.Intent(android.provider.Settings.ACTION_SETTINGS)) } catch (_: Throwable) {}
+            }
+        }
+        b.show()
+    }
+
     /** Shown every time before translating: what machine translation can and can't do. */
     fun disclaimer(a: AppCompatActivity, go: () -> Unit) {
         val d = a.resources.displayMetrics.density
@@ -211,11 +228,9 @@ object TranslateSheet {
                         progress.visibility = View.GONE
                         downloadBtn.isEnabled = true
                         if (problem != null) {
-                            note.text = (problem as? Translator.DownloadProblem)?.message
-                                ?: "Couldn't download — check your internet connection and try again."
+                            note.text = "The language didn't download."
                             downloadBtn.text = "Try again"
-                            if ((problem as? Translator.DownloadProblem)?.openDownloadManager == true)
-                                Translator.openDownloadManagerSettings(a)
+                            showProblem(a, "Download didn't finish", problem)
                             return@launch
                         }
                         have = have + missing

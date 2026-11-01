@@ -186,14 +186,6 @@ class TranslateLanguagesActivity : BaseActivity() {
     }
 
     /** Says why a download failed, with a way to fix it. */
-    private fun explain(r: Row, e: Throwable) {
-        val p = e as? Translator.DownloadProblem
-        val b = MaterialAlertDialogBuilder(this)
-            .setTitle("${r.lang.name} didn't download")
-            .setMessage(p?.message ?: "Couldn't finish — check your internet connection and try again.")
-            .setPositiveButton("Try again") { _, _ -> act(r) }
-            .setNegativeButton("Close", null)
-        if (p?.openDownloadManager == true) b.setNeutralButton("Open settings") { _, _ -> Translator.openDownloadManagerSettings(this) }
-        b.show()
-    }
+    private fun explain(r: Row, e: Throwable) =
+        TranslateSheet.showProblem(this, "${r.lang.name} didn't download", e) { act(r) }
 }
