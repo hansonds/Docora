@@ -19,6 +19,17 @@ import java.io.File
 /** Small shared UI helpers: progress dialog for long jobs, result dialog, padded dialog content. */
 object Ui {
 
+    /** A colour from the current theme (so light, dark and pure-black modes all match). */
+    fun themeColor(ctx: android.content.Context, attr: Int, fallbackRes: Int): Int {
+        val tv = android.util.TypedValue()
+        return if (ctx.theme.resolveAttribute(attr, tv, true)) {
+            if (tv.resourceId != 0) androidx.core.content.ContextCompat.getColor(ctx, tv.resourceId) else tv.data
+        } else androidx.core.content.ContextCompat.getColor(ctx, fallbackRes)
+    }
+
+    fun surface(ctx: android.content.Context) = themeColor(ctx, com.google.android.material.R.attr.colorSurface, R.color.md_surface)
+    fun surfaceVariant(ctx: android.content.Context) = themeColor(ctx, com.google.android.material.R.attr.colorSurfaceVariant, R.color.md_surface_variant)
+
     fun padded(a: AppCompatActivity, v: View): View {
         val pad = (22 * a.resources.displayMetrics.density).toInt()
         return FrameLayout(a).apply {

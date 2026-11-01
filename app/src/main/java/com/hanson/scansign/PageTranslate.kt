@@ -80,7 +80,7 @@ object PageTranslate {
         val pages: List<Int> = if (pageCount <= MAX_PAGES) (0 until pageCount).toList() else listOf(current)
         var idx = pages.indexOf(current).coerceAtLeast(0)
 
-        val surface = ContextCompat.getColor(a, R.color.md_surface)
+        val surface = Ui.surface(a)
         val onSurface = ContextCompat.getColor(a, R.color.md_on_surface)
         val muted = ContextCompat.getColor(a, R.color.md_on_surface_variant)
         val accent = ContextCompat.getColor(a, Themes.accent(a).primary)
@@ -113,7 +113,7 @@ object PageTranslate {
         val langBar = LinearLayout(a).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(6f), dp(6f), dp(6f), dp(6f))
-            background = round(a, ContextCompat.getColor(a, R.color.md_surface_variant), 22f)
+            background = round(a, Ui.surfaceVariant(a), 22f)
         }
         fun langChip(caption: String): Pair<LinearLayout, TextView> {
             val box = LinearLayout(a).apply {
