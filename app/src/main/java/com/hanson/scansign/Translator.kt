@@ -61,7 +61,74 @@ object Translator {
     }
 
     /** A download that can't go on, with the reason in plain words (shown to the user). */
-    class DownloadProblem(message: String, val openDownloadManager: Boolean = false) : Exception(message)
+    class DownloadProblem(message: String, val fix: android.content.Intent? = null, val fixLabel: String = "Open settings") : Exception(message)
+
+    /** Downloads running right now (so leftovers from earlier tries can be cleared safely when it's 0). */
+    private val active = java.util.concurrent.atomic.AtomicInteger(0)
+
+    private fun appSettings(ctx: Context) = android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+        android.net.Uri.parse("package:${ctx.packageName}"))
+
+    /**
+     * Finds out why the phone isn't letting a download run, checking the usual causes one by
+     * one, and gives the setting that fixes it. [dl] = what the Download Manager said.
+     */
+    private fun diagnose(ctx: Context, dl: String): DownloadProblem {
+        val details = "\n\nDetails: $dl · Android ${android.os.Build.VERSION.RELEASE} · ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"
+        val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+        val net = try { cm?.activeNetwork } catch (_: Throwable) { null }
+        val caps = try { net?.let { cm?.getNetworkCapabilities(it) } } catch (_: Throwable) { null }
+        val link = try { net?.let { cm?.getLinkProperties(it) } } catch (_: Throwable) { null }
+        // 1. no internet at all
+        if (caps == null || !caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET))
+            return DownloadProblem("Your phone isn't connected to the internet right now. Connect to Wi-Fi or mobile data and try again.$details",
+                android.content.Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS), "Open network settings")
+        // 2. Google's download server can't be reached (VPN, ad-blocker, Private DNS, office/school Wi-Fi)
+        val reach = try {
+            val c = java.net.URL("https://dl.google.com/").openConnection() as java.net.HttpURLConnection
+            c.connectTimeout = 8000; c.readTimeout = 8000; c.requestMethod = "HEAD"
+            try { c.responseCode in 100..599 } finally { c.disconnect() }
+        } catch (_: Throwable) { false }
+        if (!reach) {
+            val dns = if (android.os.Build.VERSION.SDK_INT >= 28) link?.privateDnsServerName else null
+            val vpn = caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)
+            val who = listOfNotNull(
+                dns?.let { "Private DNS (\"$it\")" },
+                if (vpn) "a VPN or ad-blocker app" else null
+            ).joinToString(" or ").ifEmpty { "this network (some office, school or hotel Wi-Fi block it), a VPN, an ad-blocker or Private DNS" }
+            return DownloadProblem("Your phone can't reach Google's download server (dl.google.com). It's being blocked by $who. " +
+                "Turn that off for a moment (or try other Wi-Fi / mobile data), then try again.$details",
+                android.content.Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS), "Open network settings")
+        }
+        // 3. battery "Restricted" for Docora: Android delays its downloads
+        val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+        val restricted = (android.os.Build.VERSION.SDK_INT >= 28 && am?.isBackgroundRestricted == true) ||
+            (android.os.Build.VERSION.SDK_INT >= 30 && try {
+                (ctx.getSystemService(Context.USAGE_STATS_SERVICE) as android.app.usage.UsageStatsManager).appStandbyBucket >=
+                    android.app.usage.UsageStatsManager.STANDBY_BUCKET_RESTRICTED
+            } catch (_: Throwable) { false })
+        if (restricted)
+            return DownloadProblem("Docora's battery use is set to \"Restricted\" (or Docora is a sleeping app), so Android holds back its downloads. " +
+                "Open Docora's settings › Battery › choose \"Unrestricted\" or \"Optimized\", then try again.$details",
+                appSettings(ctx), "Open Docora settings")
+        // 4. Data saver on a metered network (mobile data or a phone hotspot)
+        val metered = !caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+        if (metered && cm?.restrictBackgroundStatus == android.net.ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED)
+            return DownloadProblem("Data saver is on and this connection counts as mobile data (a hotspot does too), so downloads are held back. " +
+                "Allow Docora to use data while Data saver is on (or connect to normal Wi-Fi), then try again.$details",
+                android.content.Intent(android.provider.Settings.ACTION_IGNORE_BACKGROUND_DATA_RESTRICTIONS_SETTINGS,
+                    android.net.Uri.parse("package:${ctx.packageName}")), "Allow Docora")
+        // 5. battery saver
+        val pm = ctx.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+        if (pm?.isPowerSaveMode == true)
+            return DownloadProblem("Battery saver is on, which can pause downloads. Turn it off for a moment, then try again.$details",
+                android.content.Intent(android.provider.Settings.ACTION_BATTERY_SAVER_SETTINGS), "Battery saver settings")
+        // 6. the Download Manager itself is stuck
+        return DownloadProblem("The phone's Download Manager isn't starting the download. Restart the phone and try again. " +
+            "If it still waits, open Download Manager in Settings › Apps (show system apps) › Storage › Clear cache.$details",
+            android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:$DM_PACKAGE")),
+            "Open Download Manager")
+    }
 
     private const val DM_PACKAGE = "com.android.providers.downloads"
 
@@ -74,16 +141,6 @@ object Translator {
             else -> false
         }
     } catch (_: Throwable) { false }
-
-    /** Opens the Download Manager's settings page so it can be switched on. */
-    fun openDownloadManagerSettings(ctx: Context) {
-        try {
-            ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                android.net.Uri.parse("package:$DM_PACKAGE")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
-        } catch (_: Throwable) {
-            try { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Throwable) {}
-        }
-    }
 
     /** Where the language files' downloads are: bytes so far / total, and why they wait (if they do). */
     private class Dl(val done: Long, val total: Long, val status: Int, val reason: Int)
@@ -125,12 +182,22 @@ object Translator {
         if (builtIn(code)) return
         if (downloadManagerOff(ctx)) throw DownloadProblem(
             "Your phone's Download Manager is turned off, and the language files are downloaded through it. " +
-                "Turn it on (Settings › Apps › Download Manager › Enable), then try again.", openDownloadManager = true)
+                "Turn it on (Settings › Apps › Download Manager › Enable), then try again.",
+            android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:$DM_PACKAGE")),
+            "Open Download Manager")
+        // leftovers from earlier tries (also older app versions) can block new downloads: clear them first
+        if (active.get() == 0) cancelStuck(ctx)
+        active.incrementAndGet()
+        try { downloadNow(ctx, code, status, keepGoing) } finally { active.decrementAndGet() }
+    }
+
+    private fun downloadNow(ctx: Context, code: String, status: ((String) -> Unit)?, keepGoing: () -> Boolean) {
         val task = RemoteModelManager.getInstance().download(TranslateRemoteModel.Builder(code).build(), conditions(ctx))
         val start = System.currentTimeMillis()
         var lastBytes = -1L
         var lastMove = start
         var wifiSince = 0L
+        var lastState = "no download queued"
         while (!task.isComplete) {
             Thread.sleep(700)
             if (!keepGoing()) throw DownloadProblem("Cancelled.")
@@ -140,6 +207,13 @@ object Translator {
             val total = dls.sumOf { it.total.coerceAtLeast(0) }
             if (bytes != lastBytes) { lastBytes = bytes; lastMove = now }
             val paused = dls.firstOrNull { it.status == android.app.DownloadManager.STATUS_PAUSED }
+            lastState = if (dls.isEmpty()) "no download queued" else dls.joinToString { d ->
+                val st = when (d.status) {
+                    android.app.DownloadManager.STATUS_PENDING -> "pending"; android.app.DownloadManager.STATUS_RUNNING -> "running"
+                    android.app.DownloadManager.STATUS_PAUSED -> "paused(${d.reason})"; else -> "status ${d.status}"
+                }
+                "$st, ${mb(d.done)} MB"
+            }
             val msg = when {
                 paused?.reason == android.app.DownloadManager.PAUSED_QUEUED_FOR_WIFI -> {
                     if (wifiSince == 0L) wifiSince = now
@@ -157,22 +231,17 @@ object Translator {
             if (wifiSince != 0L && now - wifiSince > 15_000) throw DownloadProblem(
                 "This phone only allows large downloads on Wi-Fi, so the language is waiting for Wi-Fi. " +
                     "Connect to Wi-Fi and try again (or it will finish by itself once Wi-Fi is on).")
-            // nothing has moved for a long time
-            if (now - lastMove > 90_000) {
+            // nothing has moved for a while: find out why
+            if (now - lastMove > 60_000) {
+                status?.invoke("Checking why it doesn't start…")
                 cancelStuck(ctx)
-                throw DownloadProblem(
-                    "The download isn't moving. Please check:\n" +
-                        "• the internet works (try Wi-Fi)\n" +
-                        "• Data saver and Battery saver are off (or Docora is allowed)\n" +
-                        "• no VPN, ad-blocker or Private DNS is blocking Google downloads\n" +
-                        "Then try again.")
+                throw diagnose(ctx, lastState)
             }
         }
         if (!task.isSuccessful) {
             val e = task.exception
-            throw DownloadProblem(
-                if (wifiOnly(ctx)) "Couldn't download — connect to Wi-Fi, or turn off \"Download only on Wi-Fi\" in Manage languages."
-                else "Couldn't download${e?.message?.let { " ($it)" } ?: ""}. Check your internet connection and try again.")
+            if (wifiOnly(ctx)) throw DownloadProblem("Couldn't download — connect to Wi-Fi, or turn off \"Download only on Wi-Fi\" in Manage languages.")
+            throw diagnose(ctx, "failed: ${e?.message ?: "unknown error"}")
         }
     }
 

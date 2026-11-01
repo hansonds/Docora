@@ -334,9 +334,8 @@ object PageTranslate {
                         } catch (e: Throwable) { e }
                     }
                     if (problem != null && (lang in missing || to in missing)) {
-                        if ((problem as? Translator.DownloadProblem)?.openDownloadManager == true) Translator.openDownloadManagerSettings(a)
-                        return Result(src, null, lang, "${missing.joinToString(" and ") { Translator.name(it) }} isn't downloaded yet.\n\n" +
-                            ((problem as? Translator.DownloadProblem)?.message ?: "Check your internet connection and try again."))
+                        TranslateSheet.showProblem(a, "Download didn't finish", problem)
+                        return Result(src, null, lang, "${missing.joinToString(" and ") { Translator.name(it) }} isn't downloaded yet.")
                     }
                     if (problem == null) have = have + missing
                 }
