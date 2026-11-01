@@ -213,7 +213,7 @@ object ShareSheet {
             row.addView(top)
             val track = android.widget.FrameLayout(a).apply {
                 background = android.graphics.drawable.GradientDrawable().apply {
-                    cornerRadius = 6 * d; setColor(ContextCompat.getColor(a, R.color.md_surface_variant))
+                    cornerRadius = 6 * d; setColor(Ui.surfaceVariant(a))
                 }
             }
             val fill = View(a).apply {
@@ -239,7 +239,7 @@ object ShareSheet {
             val b = MaterialButton(a)
             if (!primary) {
                 // softer second button: tinted background, accent text
-                b.backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(a, R.color.md_surface_variant))
+                b.backgroundTintList = ColorStateList.valueOf(Ui.surfaceVariant(a))
                 b.setTextColor(accent)
                 b.iconTint = ColorStateList.valueOf(accent)
             }

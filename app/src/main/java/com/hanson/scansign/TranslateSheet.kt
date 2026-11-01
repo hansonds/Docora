@@ -180,7 +180,7 @@ object TranslateSheet {
             textSize = 16f; setTextIsSelectable(true); setLineSpacing(0f, 1.2f)
             setPadding(dp(14f), dp(12f), dp(14f), dp(12f))
             background = android.graphics.drawable.GradientDrawable().apply {
-                cornerRadius = 14 * d; setColor(ContextCompat.getColor(a, R.color.md_surface_variant))
+                cornerRadius = 14 * d; setColor(Ui.surfaceVariant(a))
             }
         }
         val scroll = ScrollView(a).apply { addView(result); visibility = View.GONE }

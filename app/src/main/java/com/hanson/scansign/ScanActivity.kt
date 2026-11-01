@@ -269,7 +269,7 @@ class ScanActivity : BaseActivity() {
                     val inner = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = android.view.Gravity.CENTER_HORIZONTAL; setPadding((6 * d).toInt(), (6 * d).toInt(), (6 * d).toInt(), (8 * d).toInt()) }
                     inner.addView(android.widget.ImageView(this).apply {
                         setImageBitmap(previews[f]); scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
-                        setBackgroundColor(Color.rgb(235, 238, 243))
+                        setBackgroundColor(Ui.surfaceVariant(this@ScanActivity))
                     }, LinearLayout.LayoutParams(-1, (130 * d).toInt()))
                     inner.addView(TextView(this).apply {
                         text = if (f == def) "${f.label} ★" else f.label

@@ -15,7 +15,6 @@ import android.widget.Toast
 import androidx.core.content.ContextCompat
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.card.MaterialCardView
-import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 
@@ -107,13 +106,17 @@ class AboutActivity : BaseActivity() {
         }
         val badges = findViewById<ChipGroup>(R.id.badges)
         for (b in listOf("✓ 100% free", "✓ No ads", "✓ No account", "✓ Works offline")) {
-            badges.addView(Chip(this).apply {
+            badges.addView(TextView(this).apply {
                 text = b
-                isClickable = false
+                textSize = 12.5f
                 setTextColor(Color.WHITE)
-                chipBackgroundColor = android.content.res.ColorStateList.valueOf(Color.argb(45, 255, 255, 255))
-                chipStrokeWidth = 0f
-                textSize = 12f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                setPadding((12 * d).toInt(), (6 * d).toInt(), (12 * d).toInt(), (6 * d).toInt())
+                background = GradientDrawable().apply {
+                    cornerRadius = 50 * d
+                    setColor(Color.argb(46, 255, 255, 255))
+                    setStroke((1 * d).toInt().coerceAtLeast(1), Color.argb(90, 255, 255, 255))
+                }
             })
         }
 
@@ -152,7 +155,12 @@ class AboutActivity : BaseActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding((16 * d).toInt(), (16 * d).toInt(), (16 * d).toInt(), (12 * d).toInt())
         }
-        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val head = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            clipChildren = false; clipToPadding = false
+            setPadding(0, (2 * d).toInt(), 0, (6 * d).toInt())
+        }
+        inner.clipChildren = false; inner.clipToPadding = false
         val tile = FrameLayout(this)
         val icon = ImageView(this)
         tile.addView(icon, FrameLayout.LayoutParams((22 * d).toInt(), (22 * d).toInt(), Gravity.CENTER))
