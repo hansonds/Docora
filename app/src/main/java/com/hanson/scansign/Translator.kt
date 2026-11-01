@@ -73,6 +73,41 @@ object Translator {
      * Finds out why the phone isn't letting a download run, checking the usual causes one by
      * one, and gives the setting that fixes it. [dl] = what the Download Manager said.
      */
+    /**
+     * Tries a tiny download through the phone's Download Manager (a few hundred bytes from Google)
+     * to see whether it runs downloads for Docora at all.
+     */
+    private fun downloadManagerTest(ctx: Context): String {
+        val dm = ctx.getSystemService(Context.DOWNLOAD_SERVICE) as? android.app.DownloadManager ?: return "no Download Manager"
+        var id = -1L
+        try {
+            val req = android.app.DownloadManager.Request(android.net.Uri.parse("https://dl.google.com/robots.txt"))
+                .setTitle("Docora connection test")
+                .setDestinationInExternalFilesDir(ctx, null, "dm-test.txt")
+            id = dm.enqueue(req)
+            val until = System.currentTimeMillis() + 20_000
+            var st = android.app.DownloadManager.STATUS_PENDING
+            while (System.currentTimeMillis() < until) {
+                Thread.sleep(800)
+                dm.query(android.app.DownloadManager.Query().setFilterById(id))?.use { c ->
+                    if (c.moveToFirst()) st = c.getInt(c.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_STATUS))
+                }
+                if (st == android.app.DownloadManager.STATUS_SUCCESSFUL || st == android.app.DownloadManager.STATUS_FAILED) break
+            }
+            return when (st) {
+                android.app.DownloadManager.STATUS_SUCCESSFUL -> "test ok"
+                android.app.DownloadManager.STATUS_FAILED -> "test failed"
+                android.app.DownloadManager.STATUS_RUNNING -> "test slow"
+                android.app.DownloadManager.STATUS_PAUSED -> "test paused"
+                else -> "test pending"
+            }
+        } catch (e: Throwable) {
+            return "test error"
+        } finally {
+            if (id >= 0) try { dm.remove(id) } catch (_: Throwable) {}
+        }
+    }
+
     private fun diagnose(ctx: Context, dl: String): DownloadProblem {
         val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
         val net = try { cm?.activeNetwork } catch (_: Throwable) { null }
@@ -86,7 +121,11 @@ object Translator {
         } + (if (caps != null && !caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED)) " (metered)" else "") +
             (if (caps?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN) == true) " + VPN" else "") +
             ((if (android.os.Build.VERSION.SDK_INT >= 28) link?.privateDnsServerName else null)?.let { " · DNS $it" } ?: "")
-        val details = "\n\nDetails: $dl · $kind · Android ${android.os.Build.VERSION.RELEASE} · ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"
+        val maxMobile = try { android.app.DownloadManager.getMaxBytesOverMobile(ctx) } catch (_: Throwable) { null }
+        val recMobile = try { android.app.DownloadManager.getRecommendedMaxBytesOverMobile(ctx) } catch (_: Throwable) { null }
+        val limits = listOfNotNull(maxMobile?.let { "max ${mb(it)} MB" }, recMobile?.let { "rec ${mb(it)} MB" }).joinToString(" ")
+            .let { if (it.isEmpty()) "" else " · mobile limit $it" }
+        var details = "\n\nDetails: $dl · $kind$limits · Android ${android.os.Build.VERSION.RELEASE} · ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"
         // 1. no internet at all
         if (caps == null || !caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET))
             return DownloadProblem("Your phone isn't connected to the internet right now. Connect to Wi-Fi or mobile data and try again.$details",
@@ -131,15 +170,24 @@ object Translator {
         if (pm?.isPowerSaveMode == true)
             return DownloadProblem("Battery saver is on, which can pause downloads. Turn it off for a moment, then try again.$details",
                 android.content.Intent(android.provider.Settings.ACTION_BATTERY_SAVER_SETTINGS), "Battery saver settings")
+        // the phone's Download Manager: does it run any download for Docora?
+        val test = downloadManagerTest(ctx)
+        details = details.replace("\n\nDetails: ", "\n\nDetails: $test · ")
+        if (test == "test pending" || test == "test error")
+            return DownloadProblem("The phone's Download Manager isn't running any downloads for Docora right now (even a tiny test file stayed waiting). " +
+                "This is a known problem on some phones with Android 16: restart the phone, open Docora straight away and try again. " +
+                "If it keeps happening, open Download Manager in Settings › Apps (show system apps) › Storage › Clear cache, and restart again.$details",
+                android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:$DM_PACKAGE")),
+                "Open Download Manager")
         // 6. a metered connection (mobile data, or Wi-Fi from a phone hotspot): some phones keep big downloads queued
         if (metered)
             return DownloadProblem("This connection counts as metered (mobile data, or Wi-Fi from a phone's hotspot), and this phone keeps " +
                 "large downloads waiting on metered connections. Connect to a normal Wi-Fi router, or open this Wi-Fi's settings and set " +
                 "\"Metered network\" to \"Treat as unmetered\", then try again.$details",
                 android.content.Intent(android.provider.Settings.ACTION_WIFI_SETTINGS), "Open Wi-Fi settings")
-        // 7. the Download Manager itself is stuck
-        return DownloadProblem("The phone's Download Manager isn't starting the download. Restart the phone and try again. " +
-            "If it still waits, open Download Manager in Settings › Apps (show system apps) › Storage › Clear cache.$details",
+        // 7. small downloads work, the large language file doesn't start
+        return DownloadProblem("Small downloads work, but the phone's Download Manager is holding back the large language file (about 30 MB). " +
+            "Restart the phone and try again. If it still waits, open Download Manager in Settings › Apps (show system apps) › Storage › Clear cache.$details",
             android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:$DM_PACKAGE")),
             "Open Download Manager")
     }
