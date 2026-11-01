@@ -15,7 +15,6 @@ import android.widget.Toast
 import androidx.core.content.ContextCompat
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.card.MaterialCardView
-import com.google.android.material.chip.ChipGroup
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 
 class AboutActivity : BaseActivity() {
@@ -104,20 +103,29 @@ class AboutActivity : BaseActivity() {
             text = "Version ${BuildConfig.VERSION_NAME}"
             background = GradientDrawable().apply { cornerRadius = 50 * d; setColor(Color.argb(55, 255, 255, 255)) }
         }
-        val badges = findViewById<ChipGroup>(R.id.badges)
-        for (b in listOf("✓ 100% free", "✓ No ads", "✓ No account", "✓ Works offline")) {
-            badges.addView(TextView(this).apply {
-                text = b
-                textSize = 12.5f
-                setTextColor(Color.WHITE)
-                setTypeface(typeface, android.graphics.Typeface.BOLD)
-                setPadding((12 * d).toInt(), (6 * d).toInt(), (12 * d).toInt(), (6 * d).toInt())
-                background = GradientDrawable().apply {
-                    cornerRadius = 50 * d
-                    setColor(Color.argb(46, 255, 255, 255))
-                    setStroke((1 * d).toInt().coerceAtLeast(1), Color.argb(90, 255, 255, 255))
-                }
-            })
+        // 2 × 2 grid of equal pills, evenly spaced and centred
+        val badges = findViewById<LinearLayout>(R.id.badges)
+        val labels = listOf("100% free", "No ads", "No account", "Works offline")
+        for (row in labels.chunked(2)) {
+            val line = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+            row.forEachIndexed { k, label ->
+                line.addView(TextView(this).apply {
+                    text = "✓  $label"
+                    textSize = 13.5f
+                    maxLines = 1
+                    gravity = Gravity.CENTER
+                    setTextColor(Color.WHITE)
+                    setTypeface(typeface, android.graphics.Typeface.BOLD)
+                    background = GradientDrawable().apply {
+                        cornerRadius = 50 * d
+                        setColor(Color.argb(46, 255, 255, 255))
+                        setStroke((1 * d).toInt().coerceAtLeast(1), Color.argb(100, 255, 255, 255))
+                    }
+                }, LinearLayout.LayoutParams(0, (40 * d).toInt(), 1f).apply {
+                    if (k == 0) marginEnd = (5 * d).toInt() else marginStart = (5 * d).toInt()
+                })
+            }
+            badges.addView(line, LinearLayout.LayoutParams(-1, -2).apply { if (badges.childCount > 0) topMargin = (10 * d).toInt() })
         }
 
         // feature cards
