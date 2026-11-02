@@ -163,6 +163,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         // opened from another app: only the link is known, the copy is made below
         if (path == null && sourceUri == null) { finish(); return }
         source = if (path != null) File(path) else File(cacheDir, "opening.pdf")
+        Storage.markInUse(source)
         displayName = intent.getStringExtra(EXTRA_NAME) ?: if (path != null) source.name else "document.pdf"
         toolbar.title = displayName
         findViewById<View>(R.id.btnBack).setOnClickListener { confirmLeave() }
@@ -237,6 +238,8 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     }
 
     override fun onDestroy() {
+        Storage.releaseInUse(source)
+        pdf?.let { Storage.releaseInUse(it.displayFile) }
         super.onDestroy()
         findJob?.cancel()
         closeSearchDoc()
@@ -334,6 +337,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             return
         }
         pdf = p
+        Storage.markInUse(p.displayFile)
         renderer = r
         resetSearch()
         if (betaMode) {
@@ -391,17 +395,20 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                 renderer?.close()
                 renderer = r
                 pdf = full
+                Storage.markInUse(full.displayFile)
                 resetSearch()
                 doc.setDocument(full.geoms, r, full.widgets, items)
                 doc.post { doc.goToPage(keep) }
             }
             !sameSizes -> {
                 pdf = full
+                Storage.markInUse(full.displayFile)
                 doc.setDocument(full.geoms, renderer ?: return, full.widgets, items)
                 doc.post { doc.goToPage(keep) }
             }
             else -> {
                 pdf = full
+                Storage.markInUse(full.displayFile)
                 doc.updateForm(full.geoms, full.widgets)
             }
         }
