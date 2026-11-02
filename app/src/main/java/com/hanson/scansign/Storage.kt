@@ -23,6 +23,47 @@ object Storage {
     fun newWorkFile(ctx: Context, ext: String): File =
         File(workDir(ctx), "w_${System.nanoTime()}.$ext")
 
+    /** Temporary files an open screen still needs (the PDF being edited and its working copies). */
+    private val inUse = java.util.Collections.synchronizedSet(HashSet<String>())
+    fun markInUse(f: File?) { if (f != null) inUse.add(f.absolutePath) }
+    fun releaseInUse(f: File?) { if (f != null) inUse.remove(f.absolutePath) }
+
+    /** Size of Docora's temporary files (bytes). */
+    fun tempSize(ctx: Context): Long = ctx.cacheDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+
+    /**
+     * Deletes temporary files older than [olderThanMs]: working copies of opened / shared PDFs,
+     * scan photos, share copies, translated pages, leftovers from the PDF library. Keeps files an
+     * open screen uses and the copies "Recent" still points to. Returns the bytes freed.
+     */
+    fun cleanTemp(ctx: Context, olderThanMs: Long, photosOlderThanMs: Long = olderThanMs): Long {
+        val now = System.currentTimeMillis()
+        val keep = HashSet<String>()
+        synchronized(inUse) { keep.addAll(inUse) }
+        try { Recents.list(ctx).forEach { keep.add(it.file.absolutePath) } } catch (_: Throwable) {}
+        var freed = 0L
+        fun sweep(dir: File, filter: (File) -> Boolean = { true }) {
+            dir.listFiles()?.forEach { f ->
+                if (f.isDirectory) { sweep(f, filter); if (f.listFiles()?.isEmpty() == true) f.delete(); return@forEach }
+                // scan photos may belong to a scan still in progress: they get longer
+                val age = if (f.extension.lowercase() in setOf("jpg", "jpeg", "png")) photosOlderThanMs else olderThanMs
+                if (!filter(f) || f.absolutePath in keep || now - f.lastModified() < age) return@forEach
+                val len = f.length()
+                if (f.delete()) freed += len
+            }
+        }
+        val cache = ctx.cacheDir
+        for (name in listOf("work", "share", "translated", "pdffonts")) File(cache, name).takeIf { it.isDirectory }?.let { sweep(it) }
+        // loose files at the top: the PDF being opened, the PDF library's temporary buffers
+        cache.listFiles()?.filter { it.isFile && (it.name == "opening.pdf" || it.name.endsWith(".tmp") || it.name.startsWith("PDFBox")) }
+            ?.forEach { f ->
+                if (f.absolutePath in keep || now - f.lastModified() < olderThanMs) return@forEach
+                val len = f.length()
+                if (f.delete()) freed += len
+            }
+        return freed
+    }
+
     fun listPdfs(ctx: Context): List<File> =
         (pdfDir(ctx).listFiles { f -> f.name.endsWith(".pdf", true) } ?: emptyArray())
             .sortedByDescending { it.lastModified() }

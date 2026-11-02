@@ -1,5 +1,8 @@
 package com.hanson.scansign
 
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import android.os.Bundle
 import android.widget.TextView
 import android.widget.RadioGroup
@@ -81,9 +84,29 @@ class SettingsActivity : BaseActivity() {
             Triple(R.id.secViewer, R.drawable.ic_pdf, IconTiles.Hue.BLUE),
             Triple(R.id.secScanner, R.drawable.ic_camera, IconTiles.Hue.TEAL),
             Triple(R.id.secOcr, R.drawable.ic_ocr, IconTiles.Hue.ORANGE),
-            Triple(R.id.secTranslate, R.drawable.ic_web, IconTiles.Hue.CYAN)
+            Triple(R.id.secTranslate, R.drawable.ic_web, IconTiles.Hue.CYAN),
+            Triple(R.id.secStorage, R.drawable.ic_folder, IconTiles.Hue.AMBER)
         )) findViewById<TextView>(id).setCompoundDrawablesRelativeWithIntrinsicBounds(IconTiles.badge(this, icon, hue), null, null, null)
 
+        // temporary files: show the size, clear on request (your PDFs, signatures and Recent stay)
+        val tempInfo = findViewById<android.widget.TextView>(R.id.tempInfo)
+        val clearTemp = findViewById<android.view.View>(R.id.btnClearTemp)
+        fun mb(b: Long) = String.format(java.util.Locale.US, "%.1f MB", b / 1048576.0)
+        fun showTemp() = lifecycleScope.launch {
+            val size = withContext(kotlinx.coroutines.Dispatchers.IO) { Storage.tempSize(this@SettingsActivity) }
+            tempInfo.text = "Temporary files: ${mb(size)}. These are working copies made while opening, scanning, saving and sharing. " +
+                "Docora clears old ones by itself; your PDFs, signatures and Recent list are never touched."
+        }
+        showTemp()
+        clearTemp.setOnClickListener {
+            clearTemp.isEnabled = false
+            lifecycleScope.launch {
+                val freed = withContext(kotlinx.coroutines.Dispatchers.IO) { Storage.cleanTemp(this@SettingsActivity, 10L * 60 * 1000, photosOlderThanMs = 3L * 60 * 60 * 1000) }
+                clearTemp.isEnabled = true
+                android.widget.Toast.makeText(this@SettingsActivity, "Freed ${mb(freed)}", android.widget.Toast.LENGTH_SHORT).show()
+                showTemp()
+            }
+        }
         findViewById<android.view.View>(R.id.btnLanguages).setOnClickListener {
             startActivity(android.content.Intent(this, TranslateLanguagesActivity::class.java))
         }

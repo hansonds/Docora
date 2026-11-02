@@ -11,6 +11,9 @@ class App : Application() {
         CrashReport.install(this)
         Themes.init(this)
         TextRender.init(this)
+        // temporary files from earlier sessions (kept half a day so an interrupted scan can still finish)
+        val app = this
+        Thread { try { Storage.cleanTemp(app, 12L * 60 * 60 * 1000) } catch (_: Throwable) {} }.apply { priority = Thread.MIN_PRIORITY }.start()
         PDFBoxResourceLoader.init(applicationContext)
         openCvReady = try {
             OpenCVLoader.initLocal()
