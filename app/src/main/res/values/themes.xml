@@ -16,6 +16,9 @@
         <item name="colorOutline">@color/md_outline</item>
         <item name="android:windowBackground">@color/md_background</item>
         <item name="android:windowLightStatusBar">@bool/light_bars</item>
+        <!-- see-through system bars on Android 8–14 (Android 15+ does this by itself) -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@color/nav_bar_scrim</item>
         <item name="materialCardViewStyle">@style/Widget.App.Card</item>
     </style>
 
@@ -23,6 +26,9 @@
         <item name="colorPrimary">#B4C5FF</item>
         <item name="colorSecondary">#5ADBC6</item>
         <item name="android:windowBackground">@color/surface_dark</item>
+        <!-- see-through system bars on Android 8–14 (Android 15+ does this by itself) -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@color/nav_bar_scrim</item>
     </style>
 
     <style name="Theme.ScanSign.Camera" parent="Theme.ScanSign.Dark">

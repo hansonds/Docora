@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.INTERNET" />
@@ -72,6 +73,11 @@
         <activity android:name=".TextResultActivity" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".SettingsActivity" />
         <activity android:name=".TranslateLanguagesActivity" />
+        <!-- Google's document scanner screen: allow any orientation (large screens, foldables) -->
+        <activity
+            android:name="com.google.mlkit.vision.documentscanner.internal.GmsDocumentScanningDelegateActivity"
+            android:screenOrientation="unspecified"
+            tools:replace="android:screenOrientation" />
         <activity android:name=".DrawSignatureActivity" android:screenOrientation="unspecified" />
 
         <provider

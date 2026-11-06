@@ -6,7 +6,6 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
-import androidx.activity.enableEdgeToEdge
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -84,12 +83,18 @@ open class BaseActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         Themes.apply(this)
         appliedVersion = Themes.version
-        // Android 15+ always draws apps edge-to-edge; do it on every version and keep content clear of the bars
-        if (darkSystemBars) enableEdgeToEdge(
-            androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
-            androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
-        ) else enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        // Android 15+ always draws apps edge-to-edge; do it on every version and keep content clear of the bars.
+        // (Own version of enableEdgeToEdge(): uses only current APIs. The see-through bars for
+        // Android 8–14 come from the theme.)
+        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+        val night = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+        val lightBars = !darkSystemBars && !night
+        androidx.core.view.WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = lightBars
+            isAppearanceLightNavigationBars = lightBars
+        }
     }
 
     override fun onPostCreate(savedInstanceState: Bundle?) {

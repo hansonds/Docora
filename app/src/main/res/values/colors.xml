@@ -32,4 +32,6 @@
     <color name="viewer_bg_top">#E9EDF6</color>
     <color name="viewer_bg_bottom">#D8DFEC</color>
     <color name="dock_icon">#3A4255</color>
+    <!-- navigation bar background on Android 8.0 (dark buttons need 8.1+) -->
+    <color name="nav_bar_scrim">#66000000</color>
 </resources>
