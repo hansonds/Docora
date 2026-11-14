@@ -11,7 +11,17 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/hansonds/Docora/releases/latest/download/Docora.apk"><b>⬇ Download Docora.apk</b></a> (most phones) ·
+  <a href="https://play.google.com/store/apps/details?id=com.hanson.docora">
+    <img src="https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png" height="84" alt="Get it on Google Play">
+  </a>
+</p>
+
+<p align="center">
+  <b>Now live on Google Play:</b> <a href="https://play.google.com/store/apps/details?id=com.hanson.docora"><b>play.google.com › Docora</b></a>
+</p>
+
+<p align="center">
+  Or download the APK: <a href="https://github.com/hansonds/Docora/releases/latest/download/Docora.apk"><b>⬇ Docora.apk</b></a> (most phones) ·
   <a href="https://github.com/hansonds/Docora/releases/latest/download/Docora-all-phones.apk">All phones</a> ·
   <a href="https://hansonds.github.io/Docora/privacy/">Privacy policy</a>
 </p>
@@ -80,7 +90,9 @@ Everything is processed on your phone. Your documents, scans, signatures and the
 
 ## Downloads
 
-Every [release](https://github.com/hansonds/Docora/releases) has:
+**Recommended:** install from [**Google Play**](https://play.google.com/store/apps/details?id=com.hanson.docora). You get automatic updates.
+
+Every [release](https://github.com/hansonds/Docora/releases) also has:
 
 | File | For |
 |---|---|
