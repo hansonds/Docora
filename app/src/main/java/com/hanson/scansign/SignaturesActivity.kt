@@ -104,39 +104,75 @@ class SignaturesActivity : BaseActivity() {
         findViewById<View>(R.id.btnGallery).setOnClickListener {
             pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
         }
-        if (pickMode) {
-            // ink colour for the signature about to be placed (remembered for next time)
-            val prefs = getSharedPreferences("signatures", MODE_PRIVATE)
-            pickInk = try { InkColor.valueOf(prefs.getString("ink", "ORIGINAL")!!) } catch (_: Throwable) { InkColor.ORIGINAL }
-            val d = resources.displayMetrics.density
-            val card = com.google.android.material.card.MaterialCardView(this).apply { radius = 20 * d }
-            val box = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding((16 * d).toInt(), (14 * d).toInt(), (12 * d).toInt(), (8 * d).toInt())
-            }
-            box.addView(TextView(this).apply {
-                text = "Ink colour"; textSize = 16f
-                setTypeface(typeface, android.graphics.Typeface.BOLD)
-                setCompoundDrawablesRelativeWithIntrinsicBounds(IconTiles.badge(this@SignaturesActivity, R.drawable.ic_sign, IconTiles.Hue.PINK, 30f), null, null, null)
-                compoundDrawablePadding = (10 * d).toInt(); gravity = android.view.Gravity.CENTER_VERTICAL
-            })
-            box.addView(SigColors.swatchRow(this, pickInk) { ink ->
-                pickInk = ink
-                prefs.edit().putString("ink", ink.name).apply()
-                adapter.notifyDataSetChanged()      // previews follow the chosen ink
-            }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = (8 * d).toInt() })
-            card.addView(box)
-            val tip = findViewById<View>(R.id.tip)
-            val parent = tip.parent as ViewGroup
-            parent.addView(card, parent.indexOfChild(tip) + 1, LinearLayout.LayoutParams(-1, -2).apply {
-                marginStart = (12 * d).toInt(); marginEnd = (12 * d).toInt(); topMargin = (10 * d).toInt(); bottomMargin = (4 * d).toInt()
-            })
-            findViewById<TextView>(R.id.tip).text = "Pick an ink colour, then tap a signature to place it. Tap it again on the page to change the colour."
-        }
+        if (pickMode) findViewById<TextView>(R.id.tip).text = "Tap a signature, choose its ink colour, and it's placed on your page."
+        buildEmptyState()
         reload()
     }
 
-    private var pickInk = InkColor.ORIGINAL
+    private val prefs by lazy { getSharedPreferences("signatures", MODE_PRIVATE) }
+    private fun lastInk() = try { InkColor.valueOf(prefs.getString("ink", "ORIGINAL")!!) } catch (_: Throwable) { InkColor.ORIGINAL }
+    private lateinit var emptyPanel: View
+
+    /** Friendly start screen when there are no signatures yet: three clear ways to add one. */
+    private fun buildEmptyState() {
+        val d = resources.displayMetrics.density
+        fun dp(v: Float) = (v * d).toInt()
+        val onSurface = androidx.core.content.ContextCompat.getColor(this, R.color.md_on_surface)
+        val muted = androidx.core.content.ContextCompat.getColor(this, R.color.md_on_surface_variant)
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; gravity = android.view.Gravity.CENTER_HORIZONTAL
+            setPadding(dp(20f), dp(12f), dp(20f), dp(20f))
+        }
+        box.addView(android.widget.ImageView(this).apply {
+            setImageDrawable(IconTiles.badge(this@SignaturesActivity, R.drawable.ic_sign, IconTiles.Hue.PINK, 84f))
+        })
+        box.addView(TextView(this).apply {
+            text = "Add your first signature"; textSize = 23f; setTextColor(onSurface)
+            setTypeface(typeface, android.graphics.Typeface.BOLD); gravity = android.view.Gravity.CENTER
+            setPadding(0, dp(16f), 0, dp(6f))
+        })
+        box.addView(TextView(this).apply {
+            text = "Make it once, then sign any PDF with a tap. Your signature stays on this phone."
+            textSize = 14.5f; setTextColor(muted); gravity = android.view.Gravity.CENTER; setLineSpacing(0f, 1.15f)
+            setPadding(dp(8f), 0, dp(8f), dp(20f))
+        })
+        fun option(icon: Int, hue: IconTiles.Hue, title: String, sub: String, go: () -> Unit) {
+            val card = com.google.android.material.card.MaterialCardView(this).apply {
+                radius = 20 * d; isClickable = true; isFocusable = true
+                setOnClickListener { go() }
+            }
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(dp(16f), dp(14f), dp(16f), dp(14f))
+            }
+            row.addView(android.widget.ImageView(this).apply { setImageDrawable(IconTiles.badge(this@SignaturesActivity, icon, hue, 46f)) })
+            val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14f), 0, dp(6f), 0) }
+            texts.addView(TextView(this).apply { text = title; textSize = 16.5f; setTextColor(onSurface); setTypeface(typeface, android.graphics.Typeface.BOLD) })
+            texts.addView(TextView(this).apply { text = sub; textSize = 13f; setTextColor(muted); setPadding(0, dp(2f), 0, 0) })
+            row.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(android.widget.ImageView(this).apply {
+                setImageResource(R.drawable.ic_back); rotation = 180f; setColorFilter(muted); alpha = 0.7f
+            }, LinearLayout.LayoutParams(dp(20f), dp(20f)))
+            card.addView(row)
+            box.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10f) })
+        }
+        option(R.drawable.ic_camera, IconTiles.Hue.TEAL, "Take a photo", "Sign on white paper. The paper is removed automatically.") {
+            cameraLauncher.launch(CameraActivity.intent(this, CameraActivity.MODE_SIG))
+        }
+        option(R.drawable.ic_image, IconTiles.Hue.BLUE, "Choose from gallery", "Use a picture of your signature you already have.") {
+            pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+        }
+        option(R.drawable.ic_draw, IconTiles.Hue.VIOLET, "Draw with your finger", "Sign right on the screen in a smooth pen stroke.") {
+            drawLauncher.launch(Intent(this, DrawSignatureActivity::class.java))
+        }
+        emptyPanel = android.widget.ScrollView(this).apply {
+            isFillViewport = true
+            addView(box, android.widget.FrameLayout.LayoutParams(-1, -2, android.view.Gravity.CENTER))
+        }
+        Ui.limitWidth(box, 560)
+        (empty.parent as ViewGroup).addView(emptyPanel, android.widget.FrameLayout.LayoutParams(-1, -1))
+        empty.visibility = View.GONE
+    }
 
     override fun onSupportNavigateUp(): Boolean {
         finish()
@@ -150,28 +186,80 @@ class SignaturesActivity : BaseActivity() {
     private fun reload() {
         items = Storage.listSignatures(this)
         adapter.notifyDataSetChanged()
-        empty.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
+        empty.visibility = View.GONE
+        if (::emptyPanel.isInitialized) emptyPanel.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.tip).visibility = if (items.isEmpty()) View.GONE else View.VISIBLE
     }
 
+    /** Picking: after a signature is chosen, its ink colour is chosen (with a live preview), then it's placed. */
     private fun returnSignature(f: File) {
-        setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_SIG, f.absolutePath).putExtra(EXTRA_INK, pickInk.name))
-        finish()
+        SigColors.pick(this, "Choose ink colour", f, lastInk(), action = "Place signature") { ink ->
+            prefs.edit().putString("ink", ink.name).apply()
+            setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_SIG, f.absolutePath).putExtra(EXTRA_INK, ink.name))
+            finish()
+        }
     }
 
-    /** Options for a saved signature: use, share / save as transparent PNG, delete. */
+    /** Options for a saved signature, in a bottom panel with its preview. */
     private fun options(f: File) {
-        val items = ArrayList<CharSequence>()
-        val actions = ArrayList<() -> Unit>()
-        if (pickMode) { items.add("Use this signature"); actions.add { returnSignature(f) } }
-        items.add("Change colour"); actions.add { changeColour(f) }
-        items.add("Share as PNG (transparent)"); actions.add { shareGuide(f) }
-        items.add("Save PNG to Downloads"); actions.add { savePng(f) }
-        items.add("Delete"); actions.add { confirmDelete(f) }
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Signature")
-            .setItems(items.toTypedArray()) { _, i -> actions[i]() }
-            .setNegativeButton("Cancel", null)
-            .show()
+        val d = resources.displayMetrics.density
+        fun dp(v: Float) = (v * d).toInt()
+        val onSurface = androidx.core.content.ContextCompat.getColor(this, R.color.md_on_surface)
+        val muted = androidx.core.content.ContextCompat.getColor(this, R.color.md_on_surface_variant)
+        val danger = android.graphics.Color.rgb(220, 53, 69)
+        val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16f), dp(4f), dp(16f), dp(18f)) }
+
+        // preview on a see-through-style background
+        val frame = android.widget.FrameLayout(this).apply {
+            background = SignatureEditActivity.checkerboard(this@SignaturesActivity)
+            clipToOutline = true
+            outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(v: View, o: android.graphics.Outline) { o.setRoundRect(0, 0, v.width, v.height, 18 * d) }
+            }
+        }
+        val img = ImageView(this).apply { scaleType = ImageView.ScaleType.FIT_CENTER; setPadding(dp(16f), dp(12f), dp(16f), dp(12f)) }
+        frame.addView(img, android.widget.FrameLayout.LayoutParams(-1, -1))
+        root.addView(frame, LinearLayout.LayoutParams(-1, dp(130f)))
+        lifecycleScope.launch { img.setImageBitmap(withContext(Dispatchers.IO) { ImageUtils.thumb(f, 700) }) }
+        root.addView(TextView(this).apply {
+            text = "Saved " + java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM).format(java.util.Date(f.lastModified())) +
+                " · transparent PNG"
+            textSize = 12.5f; setTextColor(muted); setPadding(dp(4f), dp(8f), 0, dp(6f))
+        })
+
+        fun row(icon: Int, hue: IconTiles.Hue, title: String, sub: String, red: Boolean = false, go: () -> Unit) {
+            val r = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(dp(8f), dp(10f), dp(8f), dp(10f))
+                isClickable = true; isFocusable = true
+                background = android.graphics.drawable.RippleDrawable(
+                    android.content.res.ColorStateList.valueOf(android.graphics.Color.argb(36, 128, 128, 128)), null,
+                    android.graphics.drawable.GradientDrawable().apply { cornerRadius = 16 * d; setColor(android.graphics.Color.WHITE) })
+                setOnClickListener { sheet.dismiss(); go() }
+            }
+            r.addView(ImageView(this).apply { setImageDrawable(IconTiles.badge(this@SignaturesActivity, icon, hue, 42f)) })
+            val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14f), 0, 0, 0) }
+            texts.addView(TextView(this).apply {
+                text = title; textSize = 16f; setTypeface(typeface, android.graphics.Typeface.BOLD)
+                setTextColor(if (red) danger else onSurface)
+            })
+            texts.addView(TextView(this).apply { text = sub; textSize = 12.5f; setTextColor(muted) })
+            r.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
+            root.addView(r, LinearLayout.LayoutParams(-1, -2))
+        }
+        if (pickMode) row(R.drawable.ic_check, IconTiles.Hue.BLUE, "Use this signature", "Choose the ink colour and place it") { returnSignature(f) }
+        row(R.drawable.ic_palette, IconTiles.Hue.PINK, "Change colour", "Black, blue, red, green or original") { changeColour(f) }
+        row(R.drawable.ic_share, IconTiles.Hue.TEAL, "Share", "As a PNG with a transparent background") { shareGuide(f) }
+        row(R.drawable.ic_save_as, IconTiles.Hue.INDIGO, "Save to Downloads", "Downloads › Docora") { savePng(f) }
+        root.addView(View(this).apply { setBackgroundColor(android.graphics.Color.argb(40, 128, 128, 128)) },
+            LinearLayout.LayoutParams(-1, dp(1f)).apply { topMargin = dp(4f); bottomMargin = dp(4f) })
+        row(R.drawable.ic_delete, IconTiles.Hue.RED, "Delete", "Remove it from this phone", red = true) { confirmDelete(f) }
+
+        sheet.setContentView(android.widget.ScrollView(this).apply { addView(root) })
+        sheet.behavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED
+        sheet.behavior.skipCollapsed = true
+        sheet.show()
     }
 
     /** Recolours a saved signature (black, blue, red, green, or back to its original colours). */
@@ -285,7 +373,6 @@ class SignaturesActivity : BaseActivity() {
             val f = items[position]
             holder.image.setImageDrawable(null)
             holder.image.tag = f.absolutePath
-            holder.image.colorFilter = if (pickMode) SigColors.previewFilter(pickInk) else null
             lifecycleScope.launch {
                 val bmp = withContext(Dispatchers.IO) { ImageUtils.thumb(f, 600) }
                 if (holder.image.tag == f.absolutePath) holder.image.setImageBitmap(bmp)

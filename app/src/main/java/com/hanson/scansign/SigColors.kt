@@ -27,17 +27,38 @@ object SigColors {
         return p.startsWith(Storage.signatureDir(ctx).absolutePath) || p.startsWith(colouredDir(ctx).absolutePath)
     }
 
-    /** Same shape and soft edges, new ink colour (the transparency is kept). */
+    /**
+     * Same shape and soft edges, new ink colour. How strongly a pixel shows comes from how much ink
+     * it holds (its darkness and opacity), so faint paper traces left in a photographed signature
+     * stay invisible instead of turning into coloured speckles.
+     */
     fun recolor(src: Bitmap, rgb: Int): Bitmap {
-        val out = src.copy(Bitmap.Config.ARGB_8888, true)
-        val w = out.width; val h = out.height
+        val w = src.width; val h = src.height
         val px = IntArray(w * h)
-        out.getPixels(px, 0, w, 0, 0, w, h)
-        val c = rgb and 0x00FFFFFF
+        src.getPixels(px, 0, w, 0, 0, w, h)
+        val ink = FloatArray(px.size)
+        var strongest = 0f
         for (i in px.indices) {
-            val a = px[i] ushr 24
-            px[i] = if (a == 0) 0 else (a shl 24) or c
+            val p = px[i]
+            val a = (p ushr 24) / 255f
+            if (a == 0f) continue
+            val lum = (0.299f * ((p shr 16) and 255) + 0.587f * ((p shr 8) and 255) + 0.114f * (p and 255)) / 255f
+            val v = a * (1f - lum)
+            ink[i] = v
+            if (v > strongest) strongest = v
         }
+        val c = rgb and 0x00FFFFFF
+        if (strongest < 0.02f) {
+            // an all-light signature (e.g. white ink): keep its shape as it is
+            for (i in px.indices) { val a = px[i] ushr 24; px[i] = if (a == 0) 0 else (a shl 24) or c }
+        } else {
+            for (i in px.indices) {
+                var s = ink[i] / strongest
+                s = if (s < 0.10f) 0f else ((s - 0.10f) / 0.75f).coerceAtMost(1f)   // drop paper traces, solid ink stays solid
+                px[i] = if (s == 0f) 0 else ((s * 255).toInt() shl 24) or c
+            }
+        }
+        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         out.setPixels(px, 0, w, 0, 0, w, h)
         return out
     }
@@ -90,7 +111,7 @@ object SigColors {
     /** A copy of [original] in [ink] for placing on a page ([original] itself for Original). */
     fun colouredCopy(ctx: Context, original: File, ink: InkColor): File {
         val rgb = ink.rgb ?: return original
-        val out = File(colouredDir(ctx), "${original.nameWithoutExtension}_${original.lastModified()}_${ink.name.lowercase()}.png")
+        val out = File(colouredDir(ctx), "${original.nameWithoutExtension}_${original.lastModified()}_${ink.name.lowercase()}_v2.png")
         if (out.exists() && out.length() > 0) return out
         val src = BitmapFactory.decodeFile(original.absolutePath) ?: return original
         write(recolor(src, rgb), out)
@@ -168,15 +189,11 @@ object SigColors {
         return row
     }
 
-    /** Colour filter that shows a signature in [ink] without changing the file (null = as it is). */
-    fun previewFilter(ink: InkColor): android.graphics.ColorFilter? =
-        ink.rgb?.let { android.graphics.PorterDuffColorFilter(it, android.graphics.PorterDuff.Mode.SRC_IN) }
-
     /**
      * Bottom panel to choose an ink colour, with a live preview of the signature [preview]
      * on a transparent-style background.
      */
-    fun pick(ctx: Context, title: String, preview: File, selected: InkColor, onPick: (InkColor) -> Unit) {
+    fun pick(ctx: Context, title: String, preview: File, selected: InkColor, action: String = "Apply colour", onPick: (InkColor) -> Unit) {
         val d = ctx.resources.displayMetrics.density
         fun dp(v: Float) = (v * d).toInt()
         val onSurface = ContextCompat.getColor(ctx, R.color.md_on_surface)
@@ -199,7 +216,13 @@ object SigColors {
         val img = android.widget.ImageView(ctx).apply {
             scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
             setPadding(dp(18f), dp(14f), dp(18f), dp(14f))
-            colorFilter = previewFilter(chosen)
+        }
+        // the real result for each ink, made once from a small copy
+        var base: Bitmap? = null
+        val made = HashMap<InkColor, Bitmap>()
+        fun show(ink: InkColor) {
+            val b = base ?: return
+            img.setImageBitmap(if (ink.rgb == null) b else made.getOrPut(ink) { recolor(b, ink.rgb) })
         }
         val frame = android.widget.FrameLayout(ctx).apply {
             background = SignatureEditActivity.checkerboard(ctx)
@@ -211,17 +234,17 @@ object SigColors {
         frame.addView(img, android.widget.FrameLayout.LayoutParams(-1, -1))
         root.addView(frame, LinearLayout.LayoutParams(-1, dp(150f)))
         Thread {
-            val b = try { ImageUtils.thumb(preview, 900) } catch (_: Throwable) { null }
-            if (b != null) img.post { img.setImageBitmap(b) }
+            val b = try { ImageUtils.thumb(preview, 700) } catch (_: Throwable) { null }
+            if (b != null) img.post { base = b; show(chosen) }
         }.start()
 
-        root.addView(swatchRow(ctx, selected) { chosen = it; img.colorFilter = previewFilter(it) },
+        root.addView(swatchRow(ctx, selected) { chosen = it; show(it) },
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(16f) })
 
         val buttons = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(18f), 0, 0) }
         val cancel = TranslateSheet.outlined(ctx).apply { text = "Cancel"; setOnClickListener { sheet.dismiss() } }
         val apply = com.google.android.material.button.MaterialButton(ctx).apply {
-            text = "Apply colour"; setIconResource(R.drawable.ic_check)
+            text = action; setIconResource(R.drawable.ic_check)
             setOnClickListener { sheet.dismiss(); onPick(chosen) }
         }
         buttons.addView(cancel, LinearLayout.LayoutParams(0, dp(52f), 1f).apply { marginEnd = dp(6f) })
