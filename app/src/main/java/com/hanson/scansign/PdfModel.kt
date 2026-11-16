@@ -94,9 +94,13 @@ class SignatureItem(
     var fw: Float,
     var fh: Float,
     /** Clockwise rotation in degrees, around the item's centre. */
-    var rotation: Float = 0f
+    var rotation: Float = 0f,
+    /** The signature as saved (before any colour change). */
+    val original: File = file,
+    /** Ink colour chosen for this signature on the page. */
+    val ink: InkColor = InkColor.ORIGINAL
 ) : EditItem() {
-    override fun copy() = SignatureItem(page, file, fx, fy, fw, fh, rotation)
+    override fun copy() = SignatureItem(page, file, fx, fy, fw, fh, rotation, original, ink)
 }
 
 open class TextItem(

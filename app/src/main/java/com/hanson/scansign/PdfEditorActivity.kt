@@ -102,7 +102,12 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         val widget = pendingSigWidget
         pendingSigWidget = null
         if (res.resultCode != Activity.RESULT_OK || path == null) return@registerForActivityResult
-        if (widget != null) placeSignatureInField(File(path), widget) else addSignature(File(path))
+        val ink = try { InkColor.valueOf(res.data?.getStringExtra(SignaturesActivity.EXTRA_INK) ?: "ORIGINAL") } catch (_: Throwable) { InkColor.ORIGINAL }
+        val original = File(path)
+        lifecycleScope.launch {
+            val file = withContext(Dispatchers.IO) { SigColors.colouredCopy(this@PdfEditorActivity, original, ink) }
+            if (widget != null) placeSignatureInField(file, widget, original, ink) else addSignature(file, original = original, ink = ink)
+        }
     }
 
     private val pickImage = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -452,6 +457,23 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             if (!betaMode) enterBeta()
             if (betaMode) startTyping(item)
         } else if (item is TextItem) textDialog(item)
+        else if (item is SignatureItem && SigColors.isSignature(this, item.original)) signatureColour(item)
+    }
+
+    /** Changes the ink colour of a signature already on the page (undo brings the old colour back). */
+    private fun signatureColour(item: SignatureItem) {
+        SigColors.pick(this, "Signature colour", item.ink) { ink ->
+            if (ink == item.ink) return@pick
+            lifecycleScope.launch {
+                val file = withContext(Dispatchers.IO) { SigColors.colouredCopy(this@PdfEditorActivity, item.original, ink) }
+                val i = items.indexOf(item)
+                if (i < 0) return@launch
+                val swapped = SignatureItem(item.page, file, item.fx, item.fy, item.fw, item.fh, item.rotation, item.original, ink)
+                items[i] = swapped
+                record()
+                doc.select(swapped)
+            }
+        }
     }
 
     override fun onItemsChanged() {
@@ -1815,20 +1837,20 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         return if (o.outWidth > 0) o.outHeight.toFloat() / o.outWidth else 0.4f
     }
 
-    private fun addSignature(file: File, width: Float = 0.3f) {
+    private fun addSignature(file: File, width: Float = 0.3f, original: File = file, ink: InkColor = InkColor.ORIGINAL) {
         val page = doc.currentPage()
         val size = doc.pageSizePt(page)
         val c = doc.visibleCenterOn(page)
         val fw = width
         val fh = fw * sigAspect(file) * size.x / size.y
-        val item = SignatureItem(page, file, c.x - fw / 2, c.y - fh / 2, fw, fh)
+        val item = SignatureItem(page, file, c.x - fw / 2, c.y - fh / 2, fw, fh, original = original, ink = ink)
         items.add(item)
         record()
         doc.select(item)
-        hintOnce("sig_hint", "Drag to move · pinch or blue dot to resize · tap × to remove")
+        hintOnce("sig_hint2", "Drag to move · pinch or blue dot to resize · tap the signature again to change its colour")
     }
 
-    private fun placeSignatureInField(file: File, w: FormWidget) {
+    private fun placeSignatureInField(file: File, w: FormWidget, original: File = file, ink: InkColor = InkColor.ORIGINAL) {
         val size = doc.pageSizePt(w.page)
         val rwPt = w.rect.width() * size.x
         val rhPt = w.rect.height() * size.y
@@ -1838,7 +1860,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         val fh = hPt / size.y
         val fx = w.rect.left + (w.rect.width() - fw) / 2
         val fy = w.rect.top + (w.rect.height() - fh) / 2
-        val item = SignatureItem(w.page, file, fx, fy, fw, fh)
+        val item = SignatureItem(w.page, file, fx, fy, fw, fh, original = original, ink = ink)
         items.add(item)
         record()
         doc.select(item)

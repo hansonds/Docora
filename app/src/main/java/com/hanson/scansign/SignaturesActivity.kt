@@ -9,6 +9,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.ProgressBar
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.PickVisualMediaRequest
@@ -30,6 +31,7 @@ class SignaturesActivity : BaseActivity() {
     companion object {
         const val EXTRA_PICK = "pick"
         const val EXTRA_SIG = "sig"
+        const val EXTRA_INK = "ink"
 
         fun intent(ctx: Context, pick: Boolean) =
             Intent(ctx, SignaturesActivity::class.java).putExtra(EXTRA_PICK, pick)
@@ -102,8 +104,32 @@ class SignaturesActivity : BaseActivity() {
         findViewById<View>(R.id.btnGallery).setOnClickListener {
             pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
         }
+        if (pickMode) {
+            // ink colour for the signature about to be placed (remembered for next time)
+            val prefs = getSharedPreferences("signatures", MODE_PRIVATE)
+            pickInk = try { InkColor.valueOf(prefs.getString("ink", "ORIGINAL")!!) } catch (_: Throwable) { InkColor.ORIGINAL }
+            val d = resources.displayMetrics.density
+            val box = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding((16 * d).toInt(), (10 * d).toInt(), (16 * d).toInt(), (4 * d).toInt())
+            }
+            box.addView(TextView(this).apply {
+                text = "Ink colour"; textSize = 14f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+            })
+            box.addView(SigColors.swatchRow(this, pickInk) { ink ->
+                pickInk = ink
+                prefs.edit().putString("ink", ink.name).apply()
+            }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = (6 * d).toInt() })
+            val tip = findViewById<View>(R.id.tip)
+            val parent = tip.parent as ViewGroup
+            parent.addView(box, parent.indexOfChild(tip) + 1)
+            findViewById<TextView>(R.id.tip).text = "Choose an ink colour, then tap a signature to place it. You can change the colour later by tapping the signature on the page."
+        }
         reload()
     }
+
+    private var pickInk = InkColor.ORIGINAL
 
     override fun onSupportNavigateUp(): Boolean {
         finish()
@@ -121,7 +147,7 @@ class SignaturesActivity : BaseActivity() {
     }
 
     private fun returnSignature(f: File) {
-        setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_SIG, f.absolutePath))
+        setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_SIG, f.absolutePath).putExtra(EXTRA_INK, pickInk.name))
         finish()
     }
 
@@ -130,6 +156,7 @@ class SignaturesActivity : BaseActivity() {
         val items = ArrayList<CharSequence>()
         val actions = ArrayList<() -> Unit>()
         if (pickMode) { items.add("Use this signature"); actions.add { returnSignature(f) } }
+        items.add("Change colour"); actions.add { changeColour(f) }
         items.add("Share as PNG (transparent)"); actions.add { shareGuide(f) }
         items.add("Save PNG to Downloads"); actions.add { savePng(f) }
         items.add("Delete"); actions.add { confirmDelete(f) }
@@ -138,6 +165,20 @@ class SignaturesActivity : BaseActivity() {
             .setItems(items.toTypedArray()) { _, i -> actions[i]() }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    /** Recolours a saved signature (black, blue, red, green, or back to its original colours). */
+    private fun changeColour(f: File) {
+        lifecycleScope.launch {
+            val now = withContext(Dispatchers.IO) { SigColors.currentInk(this@SignaturesActivity, f) }
+            SigColors.pick(this@SignaturesActivity, "Signature colour", now) { ink ->
+                lifecycleScope.launch {
+                    val ok = withContext(Dispatchers.IO) { SigColors.recolorSaved(this@SignaturesActivity, f, ink) }
+                    if (!ok) Toast.makeText(this@SignaturesActivity, "Couldn't change the colour", Toast.LENGTH_SHORT).show()
+                    reload()
+                }
+            }
+        }
     }
 
     private fun pngName() = "Docora_signature_${java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())}.png"
@@ -218,7 +259,7 @@ class SignaturesActivity : BaseActivity() {
     private fun confirmDelete(f: File) {
         MaterialAlertDialogBuilder(this)
             .setTitle("Delete this signature?")
-            .setPositiveButton("Delete") { _, _ -> f.delete(); reload() }
+            .setPositiveButton("Delete") { _, _ -> f.delete(); java.io.File(java.io.File(Storage.signatureDir(this), ".orig"), f.name).delete(); reload() }
             .setNegativeButton("Cancel", null)
             .show()
     }

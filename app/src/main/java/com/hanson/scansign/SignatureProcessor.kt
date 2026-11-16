@@ -11,7 +11,9 @@ import kotlin.math.min
 enum class InkColor(val label: String, val rgb: Int?) {
     ORIGINAL("Original", null),
     BLACK("Black", Color.rgb(15, 15, 20)),
-    BLUE("Blue", Color.rgb(16, 48, 160))
+    BLUE("Blue", Color.rgb(16, 48, 160)),
+    RED("Red", Color.rgb(196, 28, 36)),
+    GREEN("Green", Color.rgb(20, 120, 60))
 }
 
 /**
