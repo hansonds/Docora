@@ -95,6 +95,12 @@ class SignaturesActivity : BaseActivity() {
         list.layoutManager = GridLayoutManager(this, Ui.columns(this, 190, 2))
         list.adapter = adapter
 
+        // colourful add buttons, info card icon
+        findViewById<TileButton>(R.id.btnCamera).colorful(IconTiles.Hue.TEAL)
+        findViewById<TileButton>(R.id.btnGallery).colorful(IconTiles.Hue.BLUE)
+        findViewById<TileButton>(R.id.btnDraw).colorful(IconTiles.Hue.VIOLET)
+        findViewById<TextView>(R.id.tip).setCompoundDrawablesRelativeWithIntrinsicBounds(
+            IconTiles.badge(this, R.drawable.ic_sign, IconTiles.Hue.PINK, 34f), null, null, null)
         findViewById<View>(R.id.btnCamera).setOnClickListener {
             cameraLauncher.launch(CameraActivity.intent(this, CameraActivity.MODE_SIG))
         }
@@ -188,7 +194,11 @@ class SignaturesActivity : BaseActivity() {
         adapter.notifyDataSetChanged()
         empty.visibility = View.GONE
         if (::emptyPanel.isInitialized) emptyPanel.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
-        findViewById<View>(R.id.tip).visibility = if (items.isEmpty()) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.tipCard).visibility = if (items.isEmpty()) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.listTitle).visibility = if (items.isEmpty()) View.GONE else View.VISIBLE
+        findViewById<TextView>(R.id.listTitle).text = if (items.size == 1) "Your signature" else "Your signatures · ${items.size}"
+        // the empty screen already offers the three ways to add one
+        findViewById<View>(R.id.addCard).visibility = if (items.isEmpty()) View.GONE else View.VISIBLE
     }
 
     /** Picking: after a signature is chosen, its ink colour is chosen (with a live preview), then it's placed. */
@@ -362,6 +372,7 @@ class SignaturesActivity : BaseActivity() {
     inner class SigAdapter : RecyclerView.Adapter<SigAdapter.VH>() {
         inner class VH(v: View) : RecyclerView.ViewHolder(v) {
             val image: ImageView = v.findViewById(R.id.image)
+            val caption: TextView = v.findViewById(R.id.caption)
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) =
@@ -373,6 +384,8 @@ class SignaturesActivity : BaseActivity() {
             val f = items[position]
             holder.image.setImageDrawable(null)
             holder.image.tag = f.absolutePath
+            val date = java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.getDefault()).format(java.util.Date(f.lastModified()))
+            holder.caption.text = if (pickMode) "Tap to use · $date" else "Saved $date  ·  tap for options"
             lifecycleScope.launch {
                 val bmp = withContext(Dispatchers.IO) { ImageUtils.thumb(f, 600) }
                 if (holder.image.tag == f.absolutePath) holder.image.setImageBitmap(bmp)

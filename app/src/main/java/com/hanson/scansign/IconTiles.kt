@@ -92,6 +92,26 @@ object IconTiles {
  */
 class TileButton @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = null) : LinearLayout(ctx, attrs) {
 
+    /** Coloured gradient tile with a white icon and a bold label (like the home screen cards). */
+    fun colorful(hue: IconTiles.Hue) {
+        val d = resources.displayMetrics.density
+        icon.background = IconTiles.gradient(context, hue.top, hue.bottom, 16f)
+        icon.imageTintList = ColorStateList.valueOf(Color.WHITE)
+        val p = (13 * d).toInt()
+        icon.setPadding(p, p, p, p)
+        icon.layoutParams = LayoutParams((56 * d).toInt(), (56 * d).toInt())
+        icon.outlineProvider = object : android.view.ViewOutlineProvider() {
+            override fun getOutline(v: View, o: android.graphics.Outline) = o.setRoundRect(0, 0, v.width, v.height, 16 * d)
+        }
+        icon.elevation = 4 * d
+        if (android.os.Build.VERSION.SDK_INT >= 28) { icon.outlineSpotShadowColor = hue.bottom; icon.outlineAmbientShadowColor = hue.bottom }
+        label.textSize = 13f
+        label.setTypeface(null, android.graphics.Typeface.BOLD)
+        label.setTextColor(ContextCompat.getColor(context, R.color.md_on_surface))
+        label.setPadding(0, (6 * d).toInt(), 0, 0)
+        setPadding((4 * d).toInt(), (8 * d).toInt(), (4 * d).toInt(), (6 * d).toInt())
+    }
+
     private val icon = ImageView(ctx)
     private val label = TextView(ctx)
     private val dark: Boolean
