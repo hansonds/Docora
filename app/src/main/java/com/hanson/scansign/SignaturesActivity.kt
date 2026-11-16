@@ -109,22 +109,29 @@ class SignaturesActivity : BaseActivity() {
             val prefs = getSharedPreferences("signatures", MODE_PRIVATE)
             pickInk = try { InkColor.valueOf(prefs.getString("ink", "ORIGINAL")!!) } catch (_: Throwable) { InkColor.ORIGINAL }
             val d = resources.displayMetrics.density
+            val card = com.google.android.material.card.MaterialCardView(this).apply { radius = 20 * d }
             val box = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding((16 * d).toInt(), (10 * d).toInt(), (16 * d).toInt(), (4 * d).toInt())
+                setPadding((16 * d).toInt(), (14 * d).toInt(), (12 * d).toInt(), (8 * d).toInt())
             }
             box.addView(TextView(this).apply {
-                text = "Ink colour"; textSize = 14f
+                text = "Ink colour"; textSize = 16f
                 setTypeface(typeface, android.graphics.Typeface.BOLD)
+                setCompoundDrawablesRelativeWithIntrinsicBounds(IconTiles.badge(this@SignaturesActivity, R.drawable.ic_sign, IconTiles.Hue.PINK, 30f), null, null, null)
+                compoundDrawablePadding = (10 * d).toInt(); gravity = android.view.Gravity.CENTER_VERTICAL
             })
             box.addView(SigColors.swatchRow(this, pickInk) { ink ->
                 pickInk = ink
                 prefs.edit().putString("ink", ink.name).apply()
-            }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = (6 * d).toInt() })
+                adapter.notifyDataSetChanged()      // previews follow the chosen ink
+            }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = (8 * d).toInt() })
+            card.addView(box)
             val tip = findViewById<View>(R.id.tip)
             val parent = tip.parent as ViewGroup
-            parent.addView(box, parent.indexOfChild(tip) + 1)
-            findViewById<TextView>(R.id.tip).text = "Choose an ink colour, then tap a signature to place it. You can change the colour later by tapping the signature on the page."
+            parent.addView(card, parent.indexOfChild(tip) + 1, LinearLayout.LayoutParams(-1, -2).apply {
+                marginStart = (12 * d).toInt(); marginEnd = (12 * d).toInt(); topMargin = (10 * d).toInt(); bottomMargin = (4 * d).toInt()
+            })
+            findViewById<TextView>(R.id.tip).text = "Pick an ink colour, then tap a signature to place it. Tap it again on the page to change the colour."
         }
         reload()
     }
@@ -171,7 +178,7 @@ class SignaturesActivity : BaseActivity() {
     private fun changeColour(f: File) {
         lifecycleScope.launch {
             val now = withContext(Dispatchers.IO) { SigColors.currentInk(this@SignaturesActivity, f) }
-            SigColors.pick(this@SignaturesActivity, "Signature colour", now) { ink ->
+            SigColors.pick(this@SignaturesActivity, "Signature colour", f, now) { ink ->
                 lifecycleScope.launch {
                     val ok = withContext(Dispatchers.IO) { SigColors.recolorSaved(this@SignaturesActivity, f, ink) }
                     if (!ok) Toast.makeText(this@SignaturesActivity, "Couldn't change the colour", Toast.LENGTH_SHORT).show()
@@ -278,6 +285,7 @@ class SignaturesActivity : BaseActivity() {
             val f = items[position]
             holder.image.setImageDrawable(null)
             holder.image.tag = f.absolutePath
+            holder.image.colorFilter = if (pickMode) SigColors.previewFilter(pickInk) else null
             lifecycleScope.launch {
                 val bmp = withContext(Dispatchers.IO) { ImageUtils.thumb(f, 600) }
                 if (holder.image.tag == f.absolutePath) holder.image.setImageBitmap(bmp)

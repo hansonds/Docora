@@ -462,7 +462,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
 
     /** Changes the ink colour of a signature already on the page (undo brings the old colour back). */
     private fun signatureColour(item: SignatureItem) {
-        SigColors.pick(this, "Signature colour", item.ink) { ink ->
+        SigColors.pick(this, "Signature colour", item.original, item.ink) { ink ->
             if (ink == item.ink) return@pick
             lifecycleScope.launch {
                 val file = withContext(Dispatchers.IO) { SigColors.colouredCopy(this@PdfEditorActivity, item.original, ink) }

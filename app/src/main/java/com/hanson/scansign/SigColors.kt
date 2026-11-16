@@ -10,7 +10,6 @@ import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.content.ContextCompat
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import java.io.File
 
 /** Ink colours for signatures: recolour saved ones, or make a coloured copy to place on a page. */
@@ -99,59 +98,139 @@ object SigColors {
         return out
     }
 
-    /** A row of round colour swatches with names; the chosen one gets a ring. */
+    /** Paint colour shown for an ink (Original gets a soft mixed swatch). */
+    private fun swatch(ctx: Context, ink: InkColor, selected: Boolean, accent: Int): android.graphics.drawable.Drawable {
+        val d = ctx.resources.displayMetrics.density
+        val fill = ink.rgb
+        val dot = if (fill == null) GradientDrawable(GradientDrawable.Orientation.TL_BR,
+            intArrayOf(Color.rgb(28, 28, 36), Color.rgb(36, 72, 200), Color.rgb(196, 28, 36))).apply { shape = GradientDrawable.OVAL }
+        else GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(fill) }
+        dot.setStroke((1 * d).toInt().coerceAtLeast(1), Color.argb(50, 0, 0, 0))
+        val ring = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(Color.TRANSPARENT)
+            setStroke((2.5f * d).toInt(), if (selected) accent else Color.TRANSPARENT)
+        }
+        return android.graphics.drawable.LayerDrawable(arrayOf(ring, dot)).apply {
+            val inset = (6 * d).toInt()
+            setLayerInset(1, inset, inset, inset, inset)
+        }
+    }
+
+    /**
+     * A row of round ink swatches with names. The chosen one gets a ring in the app colour and a
+     * check mark; tapping one calls [onPick].
+     */
     fun swatchRow(ctx: Context, selected: InkColor, onPick: (InkColor) -> Unit): LinearLayout {
         val d = ctx.resources.displayMetrics.density
         val accent = ContextCompat.getColor(ctx, Themes.accent(ctx).primary)
         val muted = ContextCompat.getColor(ctx, R.color.md_on_surface_variant)
         val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
         var current = selected
-        val dots = ArrayList<Pair<InkColor, View>>()
+        class Cell(val ink: InkColor, val dot: android.widget.FrameLayout, val check: android.widget.ImageView, val label: TextView)
+        val cells = ArrayList<Cell>()
         fun paint() {
-            for ((ink, v) in dots) {
-                val fill = ink.rgb
-                v.background = if (fill == null) GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                    intArrayOf(Color.rgb(20, 20, 30), Color.rgb(16, 48, 160), Color.rgb(200, 30, 40))).apply {
-                    shape = GradientDrawable.OVAL
-                    setStroke(((if (ink == current) 4 else 1) * d).toInt(), if (ink == current) accent else Color.argb(60, 128, 128, 128))
-                } else GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL; setColor(fill)
-                    setStroke(((if (ink == current) 4 else 1) * d).toInt(), if (ink == current) accent else Color.argb(60, 128, 128, 128))
-                }
+            for (c in cells) {
+                val on = c.ink == current
+                c.dot.background = swatch(ctx, c.ink, on, accent)
+                c.check.visibility = if (on) View.VISIBLE else View.GONE
+                c.label.setTextColor(if (on) accent else muted)
+                c.label.setTypeface(null, if (on) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
             }
         }
         for (ink in InkColor.values()) {
             val cell = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
-                setPadding((4 * d).toInt(), (4 * d).toInt(), (4 * d).toInt(), (4 * d).toInt())
+                setPadding(0, (4 * d).toInt(), 0, (4 * d).toInt())
                 isClickable = true; isFocusable = true
-                contentDescription = ink.label
+                contentDescription = "${ink.label} ink"
+                background = android.graphics.drawable.RippleDrawable(
+                    android.content.res.ColorStateList.valueOf(Color.argb(30, 128, 128, 128)), null,
+                    GradientDrawable().apply { cornerRadius = 16 * d; setColor(Color.WHITE) })
             }
-            val dot = View(ctx)
-            cell.addView(dot, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
-            cell.addView(TextView(ctx).apply {
-                text = ink.label; textSize = 11.5f; setTextColor(muted); gravity = Gravity.CENTER
-                setPadding(0, (4 * d).toInt(), 0, 0)
-            })
-            cell.setOnClickListener { current = ink; paint(); onPick(ink) }
+            val dot = android.widget.FrameLayout(ctx)
+            val check = android.widget.ImageView(ctx).apply {
+                setImageResource(R.drawable.ic_check)
+                setColorFilter(Color.WHITE)
+            }
+            dot.addView(check, android.widget.FrameLayout.LayoutParams((20 * d).toInt(), (20 * d).toInt(), Gravity.CENTER))
+            cell.addView(dot, LinearLayout.LayoutParams((52 * d).toInt(), (52 * d).toInt()))
+            val label = TextView(ctx).apply {
+                text = ink.label; textSize = 12f; gravity = Gravity.CENTER
+                setPadding(0, (2 * d).toInt(), 0, 0)
+            }
+            cell.addView(label)
+            cell.setOnClickListener { if (current != ink) { current = ink; paint(); onPick(ink) } }
             row.addView(cell, LinearLayout.LayoutParams(0, -2, 1f))
-            dots.add(ink to dot)
+            cells.add(Cell(ink, dot, check, label))
         }
         paint()
         return row
     }
 
-    /** Dialog to choose an ink colour. */
-    fun pick(ctx: Context, title: String, selected: InkColor, onPick: (InkColor) -> Unit) {
+    /** Colour filter that shows a signature in [ink] without changing the file (null = as it is). */
+    fun previewFilter(ink: InkColor): android.graphics.ColorFilter? =
+        ink.rgb?.let { android.graphics.PorterDuffColorFilter(it, android.graphics.PorterDuff.Mode.SRC_IN) }
+
+    /**
+     * Bottom panel to choose an ink colour, with a live preview of the signature [preview]
+     * on a transparent-style background.
+     */
+    fun pick(ctx: Context, title: String, preview: File, selected: InkColor, onPick: (InkColor) -> Unit) {
         val d = ctx.resources.displayMetrics.density
+        fun dp(v: Float) = (v * d).toInt()
+        val onSurface = ContextCompat.getColor(ctx, R.color.md_on_surface)
+        val muted = ContextCompat.getColor(ctx, R.color.md_on_surface_variant)
+        val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(ctx)
+        val root = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20f), dp(4f), dp(20f), dp(20f)) }
+
+        root.addView(TextView(ctx).apply {
+            text = title; textSize = 20f; setTextColor(onSurface); setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setCompoundDrawablesRelativeWithIntrinsicBounds(IconTiles.badge(ctx, R.drawable.ic_sign, IconTiles.Hue.PINK, 34f), null, null, null)
+            compoundDrawablePadding = dp(12f); gravity = Gravity.CENTER_VERTICAL
+        })
+        root.addView(TextView(ctx).apply {
+            text = "Only the ink changes. The shape and soft edges stay the same."
+            textSize = 13f; setTextColor(muted); setPadding(0, dp(4f), 0, dp(14f))
+        })
+
+        // live preview
         var chosen = selected
-        val box = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; setPadding((16 * d).toInt(), (12 * d).toInt(), (16 * d).toInt(), 0) }
-        box.addView(swatchRow(ctx, selected) { chosen = it })
-        MaterialAlertDialogBuilder(ctx)
-            .setTitle(title)
-            .setView(box)
-            .setPositiveButton("Apply") { _, _ -> onPick(chosen) }
-            .setNegativeButton("Cancel", null)
-            .show()
+        val img = android.widget.ImageView(ctx).apply {
+            scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+            setPadding(dp(18f), dp(14f), dp(18f), dp(14f))
+            colorFilter = previewFilter(chosen)
+        }
+        val frame = android.widget.FrameLayout(ctx).apply {
+            background = SignatureEditActivity.checkerboard(ctx)
+            clipToOutline = true
+            outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(v: View, o: android.graphics.Outline) { o.setRoundRect(0, 0, v.width, v.height, 18 * d) }
+            }
+        }
+        frame.addView(img, android.widget.FrameLayout.LayoutParams(-1, -1))
+        root.addView(frame, LinearLayout.LayoutParams(-1, dp(150f)))
+        Thread {
+            val b = try { ImageUtils.thumb(preview, 900) } catch (_: Throwable) { null }
+            if (b != null) img.post { img.setImageBitmap(b) }
+        }.start()
+
+        root.addView(swatchRow(ctx, selected) { chosen = it; img.colorFilter = previewFilter(it) },
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(16f) })
+
+        val buttons = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(18f), 0, 0) }
+        val cancel = TranslateSheet.outlined(ctx).apply { text = "Cancel"; setOnClickListener { sheet.dismiss() } }
+        val apply = com.google.android.material.button.MaterialButton(ctx).apply {
+            text = "Apply colour"; setIconResource(R.drawable.ic_check)
+            setOnClickListener { sheet.dismiss(); onPick(chosen) }
+        }
+        buttons.addView(cancel, LinearLayout.LayoutParams(0, dp(52f), 1f).apply { marginEnd = dp(6f) })
+        buttons.addView(apply, LinearLayout.LayoutParams(0, dp(52f), 1f).apply { marginStart = dp(6f) })
+        root.addView(buttons)
+
+        sheet.setContentView(root)
+        sheet.behavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED
+        sheet.behavior.skipCollapsed = true
+        sheet.show()
     }
 }

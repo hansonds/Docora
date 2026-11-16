@@ -20,7 +20,6 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
-import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -78,24 +77,13 @@ class SignatureEditActivity : BaseActivity() {
         sensLabel = findViewById(R.id.sensLabel)
         findViewById<View>(R.id.previewFrame).background = checkerboard(this)
 
+        // ink colour: the same round swatches used everywhere for signatures
         val inkGroup = findViewById<ChipGroup>(R.id.inkGroup)
-        for (c in InkColor.values()) {
-            val chip = Chip(this).apply {
-                id = View.generateViewId()
-                text = c.label
-                isCheckable = true
-                tag = c
-            }
-            inkGroup.addView(chip)
-            if (c == ink) chip.isChecked = true
-        }
-        inkGroup.isSingleSelection = true
-        inkGroup.isSelectionRequired = true
-        inkGroup.setOnCheckedStateChangeListener { group, ids ->
-            val chip = ids.firstOrNull()?.let { group.findViewById<Chip>(it) } ?: return@setOnCheckedStateChangeListener
-            ink = chip.tag as InkColor
-            render()
-        }
+        inkGroup.visibility = View.GONE
+        val inkParent = inkGroup.parent as android.view.ViewGroup
+        inkParent.addView(SigColors.swatchRow(this, ink) { c -> ink = c; render() },
+            inkParent.indexOfChild(inkGroup) + 1,
+            android.widget.LinearLayout.LayoutParams(-1, -2).apply { topMargin = (6 * resources.displayMetrics.density).toInt() })
 
         val listener = object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) { if (fromUser) render() }
