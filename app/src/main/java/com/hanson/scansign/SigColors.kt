@@ -50,32 +50,42 @@ object SigColors {
     }
 
     /** Recolours a saved signature in place. The original is kept once, so "Original" restores it. */
-    fun recolorSaved(ctx: Context, f: File, ink: InkColor): Boolean = try {
-        val orig = originalOf(ctx, f)
-        if (ink.rgb == null) {
-            if (orig.exists()) { orig.copyTo(f, overwrite = true); orig.delete() }
-            true
-        } else {
+    fun recolorSaved(ctx: Context, f: File, ink: InkColor): Boolean {
+        try {
+            val orig = originalOf(ctx, f)
+            val rgb = ink.rgb
+            if (rgb == null) {
+                if (orig.exists()) { orig.copyTo(f, overwrite = true); orig.delete() }
+                return true
+            }
             if (!orig.exists()) { orig.parentFile?.mkdirs(); f.copyTo(orig, overwrite = true) }
             val src = BitmapFactory.decodeFile(orig.absolutePath) ?: return false
-            write(recolor(src, ink.rgb), f)
+            write(recolor(src, rgb), f)
             src.recycle()
-            true
+            return true
+        } catch (_: Throwable) {
+            return false
         }
-    } catch (_: Throwable) { false }
+    }
 
     /** The colour a saved signature has now (Original if it was never recoloured). */
     fun currentInk(ctx: Context, f: File): InkColor {
         if (!originalOf(ctx, f).exists()) return InkColor.ORIGINAL
-        return try {
+        try {
             val b = BitmapFactory.decodeFile(f.absolutePath) ?: return InkColor.ORIGINAL
             var found = InkColor.ORIGINAL
             loop@ for (y in 0 until b.height step 4) for (x in 0 until b.width step 4) {
                 val p = b.getPixel(x, y)
-                if (Color.alpha(p) > 200) { found = InkColor.values().firstOrNull { it.rgb != null && (it.rgb and 0xFFFFFF) == (p and 0xFFFFFF) } ?: InkColor.ORIGINAL; break@loop }
+                if (Color.alpha(p) > 200) {
+                    found = InkColor.values().firstOrNull { c -> c.rgb != null && (c.rgb and 0xFFFFFF) == (p and 0xFFFFFF) } ?: InkColor.ORIGINAL
+                    break@loop
+                }
             }
-            b.recycle(); found
-        } catch (_: Throwable) { InkColor.ORIGINAL }
+            b.recycle()
+            return found
+        } catch (_: Throwable) {
+            return InkColor.ORIGINAL
+        }
     }
 
     /** A copy of [original] in [ink] for placing on a page ([original] itself for Original). */
