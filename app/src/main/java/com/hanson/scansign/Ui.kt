@@ -86,6 +86,7 @@ object Ui {
             .setPositiveButton("Open") { _, _ -> a.startActivity(PdfEditorActivity.intent(a, file)) }
             .setNeutralButton("Share") { _, _ -> share(a, file) }
             .setNegativeButton("Close", null)
+            .setOnDismissListener { RateApp.goodMoment(a) }
             .show()
     }
 

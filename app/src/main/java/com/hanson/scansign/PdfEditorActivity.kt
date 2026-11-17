@@ -2789,10 +2789,14 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                     .setPositiveButton("Share") { _, _ -> Ui.share(this@PdfEditorActivity, file) }
                     .setNeutralButton("Print") { _, _ -> Ui.print(this@PdfEditorActivity, file) }
                     .setNegativeButton("Keep editing", null)
+                    .setOnDismissListener { RateApp.goodMoment(this@PdfEditorActivity) }
                     .show()
-                else -> Toast.makeText(this@PdfEditorActivity,
-                    (if (prepared != null) "Compressed & saved · ${android.text.format.Formatter.formatShortFileSize(this@PdfEditorActivity, file.length())}" else "Saved") +
-                        (if (exported) " · copy in Downloads › Docora" else ""), Toast.LENGTH_LONG).show()
+                else -> {
+                    Toast.makeText(this@PdfEditorActivity,
+                        (if (prepared != null) "Compressed & saved · ${android.text.format.Formatter.formatShortFileSize(this@PdfEditorActivity, file.length())}" else "Saved") +
+                            (if (exported) " · copy in Downloads › Docora" else ""), Toast.LENGTH_LONG).show()
+                    RateApp.goodMoment(this@PdfEditorActivity)
+                }
             }
         }
     }

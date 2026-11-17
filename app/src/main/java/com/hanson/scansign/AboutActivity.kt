@@ -136,6 +136,7 @@ class AboutActivity : BaseActivity() {
         findViewById<TextView>(R.id.devAvatar).background = IconTiles.gradient(this, IconTiles.Hue.VIOLET.top, IconTiles.Hue.INDIGO.bottom, 26f)
         findViewById<View>(R.id.btnWeb).setOnClickListener { open("https://phoenicx.org") }
         findViewById<View>(R.id.btnPrivacy).setOnClickListener { open("https://hansonds.github.io/Docora/privacy/") }
+        findViewById<View>(R.id.btnRate).setOnClickListener { RateApp.openStore(this) }
 
         // engines + credits
         findViewById<TextView>(R.id.secStatus).setCompoundDrawablesRelativeWithIntrinsicBounds(

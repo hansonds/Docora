@@ -85,7 +85,8 @@ class SettingsActivity : BaseActivity() {
             Triple(R.id.secScanner, R.drawable.ic_camera, IconTiles.Hue.TEAL),
             Triple(R.id.secOcr, R.drawable.ic_ocr, IconTiles.Hue.ORANGE),
             Triple(R.id.secTranslate, R.drawable.ic_web, IconTiles.Hue.CYAN),
-            Triple(R.id.secStorage, R.drawable.ic_folder, IconTiles.Hue.AMBER)
+            Triple(R.id.secStorage, R.drawable.ic_folder, IconTiles.Hue.AMBER),
+            Triple(R.id.secRate, R.drawable.ic_star, IconTiles.Hue.ORANGE)
         )) findViewById<TextView>(id).setCompoundDrawablesRelativeWithIntrinsicBounds(IconTiles.badge(this, icon, hue), null, null, null)
 
         // temporary files: show the size, clear on request (your PDFs, signatures and Recent stay)
@@ -107,6 +108,7 @@ class SettingsActivity : BaseActivity() {
                 showTemp()
             }
         }
+        findViewById<android.view.View>(R.id.btnRateSettings).setOnClickListener { RateApp.openStore(this) }
         findViewById<android.view.View>(R.id.btnLanguages).setOnClickListener {
             startActivity(android.content.Intent(this, TranslateLanguagesActivity::class.java))
         }

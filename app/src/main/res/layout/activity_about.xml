@@ -195,6 +195,15 @@
                             android:text="Privacy"
                             app:icon="@drawable/ic_lock" />
                     </LinearLayout>
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnRate"
+                        style="@style/Widget.App.PrimaryButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="52dp"
+                        android:layout_marginTop="10dp"
+                        android:text="Rate Docora on Google Play  ★"
+                        app:icon="@drawable/ic_star" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
