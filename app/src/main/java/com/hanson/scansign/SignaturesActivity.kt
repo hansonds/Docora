@@ -118,6 +118,13 @@ class SignaturesActivity : BaseActivity() {
         }
         if (pickMode) findViewById<TextView>(R.id.tip).text = "Tap a signature, choose its ink colour, and it's placed on your page."
         buildEmptyState()
+        // older signatures (saved in their own shape) become 4:3 like new ones, once
+        val sp = getSharedPreferences("signatures", MODE_PRIVATE)
+        if (!sp.getBoolean("fit43", false)) lifecycleScope.launch {
+            val changed = withContext(Dispatchers.IO) { SigColors.migrateTo43(this@SignaturesActivity) }
+            sp.edit().putBoolean("fit43", true).apply()
+            if (changed) reload()
+        }
         reload()
     }
 
@@ -218,7 +225,7 @@ class SignaturesActivity : BaseActivity() {
             val big = maxOf(out.width, out.height)
             if (big > 2000) out = android.graphics.Bitmap.createScaledBitmap(out, out.width * 2000 / big, out.height * 2000 / big, true)
             val dest = File(Storage.signatureDir(this), "sig_${System.currentTimeMillis()}.png")
-            ImageUtils.savePng(out, dest)
+            ImageUtils.savePng(SigColors.fit43(out), dest)
             b.recycle()
             dest
         } catch (_: Throwable) { null }

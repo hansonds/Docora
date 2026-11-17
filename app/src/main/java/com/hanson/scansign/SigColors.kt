@@ -28,6 +28,46 @@ object SigColors {
     }
 
     /**
+     * Every saved signature is a 4:3 picture (the same shape as the crop box): the trimmed ink is
+     * centred on a transparent 4:3 canvas with a small margin. Already-4:3 pictures are kept.
+     */
+    fun fit43(src: Bitmap): Bitmap {
+        val w = src.width; val h = src.height
+        if (w <= 0 || h <= 0) return src
+        val ratio = w.toFloat() / h
+        if (kotlin.math.abs(ratio - 4f / 3f) < 0.01f) return src
+        // canvas: ink fills 92% of the tighter side
+        val cw: Int; val ch: Int
+        if (ratio > 4f / 3f) { cw = (w / 0.92f).toInt(); ch = (cw * 3f / 4f).toInt() }
+        else { ch = (h / 0.92f).toInt(); cw = (ch * 4f / 3f).toInt() }
+        val out = Bitmap.createBitmap(cw, ch, Bitmap.Config.ARGB_8888)
+        android.graphics.Canvas(out).drawBitmap(src, (cw - w) / 2f, (ch - h) / 2f, null)
+        return out
+    }
+
+    /**
+     * Turns older saved signatures (any shape) into 4:3 once, keeping their kept originals in step.
+     * Runs in the background; returns true when something changed.
+     */
+    fun migrateTo43(ctx: Context): Boolean {
+        var changed = false
+        for (f in Storage.listSignatures(ctx) + (File(Storage.signatureDir(ctx), ".orig").listFiles()?.toList() ?: emptyList())) {
+            try {
+                val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(f.absolutePath, o)
+                if (o.outWidth <= 0 || kotlin.math.abs(o.outWidth.toFloat() / o.outHeight - 4f / 3f) < 0.01f) continue
+                val b = BitmapFactory.decodeFile(f.absolutePath) ?: continue
+                val stamp = f.lastModified()
+                write(fit43(b), f)
+                f.setLastModified(stamp)      // keep its place and date in the list
+                b.recycle()
+                changed = true
+            } catch (_: Throwable) {}
+        }
+        return changed
+    }
+
+    /**
      * Same shape and soft edges, new ink colour. How strongly a pixel shows comes from how much ink
      * it holds (its darkness and opacity), so faint paper traces left in a photographed signature
      * stay invisible instead of turning into coloured speckles.
@@ -111,7 +151,7 @@ object SigColors {
     /** A copy of [original] in [ink] for placing on a page ([original] itself for Original). */
     fun colouredCopy(ctx: Context, original: File, ink: InkColor): File {
         val rgb = ink.rgb ?: return original
-        val out = File(colouredDir(ctx), "${original.nameWithoutExtension}_${original.lastModified()}_${ink.name.lowercase()}_v2.png")
+        val out = File(colouredDir(ctx), "${original.nameWithoutExtension}_${original.lastModified()}_${ink.name.lowercase()}_v3.png")
         if (out.exists() && out.length() > 0) return out
         val src = BitmapFactory.decodeFile(original.absolutePath) ?: return original
         write(recolor(src, rgb), out)

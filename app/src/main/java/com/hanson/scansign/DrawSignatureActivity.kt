@@ -52,7 +52,7 @@ class DrawSignatureActivity : BaseActivity() {
             if (bmp == null) { Ui.toast(this, "Draw your signature first"); return@setOnClickListener }
             lifecycleScope.launch {
                 val out = File(Storage.signatureDir(this@DrawSignatureActivity), "sig_${System.currentTimeMillis()}.png")
-                withContext(Dispatchers.IO) { ImageUtils.savePng(bmp, out) }
+                withContext(Dispatchers.IO) { ImageUtils.savePng(SigColors.fit43(bmp), out) }
                 setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_OUT, out.absolutePath))
                 finish()
             }
