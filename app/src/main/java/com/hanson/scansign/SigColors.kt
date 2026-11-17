@@ -244,7 +244,7 @@ object SigColors {
         val buttons = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(18f), 0, 0) }
         val cancel = TranslateSheet.outlined(ctx).apply { text = "Cancel"; setOnClickListener { sheet.dismiss() } }
         val apply = com.google.android.material.button.MaterialButton(ctx).apply {
-            text = action; setIconResource(R.drawable.ic_check)
+            text = action; setIconResource(R.drawable.ic_check); maxLines = 1
             setOnClickListener { sheet.dismiss(); onPick(chosen) }
         }
         buttons.addView(cancel, LinearLayout.LayoutParams(0, dp(52f), 1f).apply { marginEnd = dp(6f) })

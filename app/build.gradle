@@ -11,8 +11,8 @@ android {
         applicationId "com.hanson.docora"
         minSdk 26
         targetSdk 36
-        versionCode 58
-        versionName "7.6"
+        versionCode 59
+        versionName "7.7"
         // only 64-bit and 32-bit ARM phones (the APK build below limits this with its split instead)
         if (!project.hasProperty('apkSplits')) {
             ndk {

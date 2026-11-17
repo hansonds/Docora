@@ -53,8 +53,14 @@ class SignaturesActivity : BaseActivity() {
         progress.visibility = View.VISIBLE
         lifecycleScope.launch {
             val f = withContext(Dispatchers.IO) { Storage.copyUriToWork(this@SignaturesActivity, uri, "jpg") }
+            val ready = if (f == null) null else withContext(Dispatchers.IO) { addTransparent(f) }
             progress.visibility = View.GONE
-            if (f != null) crop(f)
+            if (ready != null) {
+                // already a clean signature (e.g. a PNG saved from Docora): keep it exactly as it is
+                reload()
+                Toast.makeText(this@SignaturesActivity, "Added as it is — it already has a transparent background", Toast.LENGTH_LONG).show()
+                if (pickMode) returnSignature(ready)
+            } else if (f != null) crop(f)
             else Toast.makeText(this@SignaturesActivity, "Could not open the photo", Toast.LENGTH_SHORT).show()
         }
     }
@@ -116,7 +122,6 @@ class SignaturesActivity : BaseActivity() {
     }
 
     private val prefs by lazy { getSharedPreferences("signatures", MODE_PRIVATE) }
-    private fun lastInk() = try { InkColor.valueOf(prefs.getString("ink", "ORIGINAL")!!) } catch (_: Throwable) { InkColor.ORIGINAL }
     private lateinit var emptyPanel: View
 
     /** Friendly start screen when there are no signatures yet: three clear ways to add one. */
@@ -185,6 +190,40 @@ class SignaturesActivity : BaseActivity() {
         return true
     }
 
+    /**
+     * If [f] is a picture with a see-through background (a signature PNG), saves it straight into
+     * My signatures, trimmed to the ink, and returns it. Photos (no transparency) return null and
+     * go through crop + paper removal as usual.
+     */
+    private fun addTransparent(f: File): File? {
+        return try {
+            val o = android.graphics.BitmapFactory.Options().apply { inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888 }
+            var b = android.graphics.BitmapFactory.decodeFile(f.absolutePath, o) ?: return null
+            if (!b.hasAlpha()) { b.recycle(); return null }
+            val w = b.width; val h = b.height
+            val px = IntArray(w * h)
+            b.getPixels(px, 0, w, 0, 0, w, h)
+            var clear = 0
+            var l = w; var t = h; var r = -1; var btm = -1
+            for (y in 0 until h) for (x in 0 until w) {
+                val a = px[y * w + x] ushr 24
+                if (a < 20) { clear++; continue }
+                if (x < l) l = x; if (x > r) r = x; if (y < t) t = y; if (y > btm) btm = y
+            }
+            // mostly see-through and some ink: it's a transparent signature
+            if (clear < px.size * 0.3 || r < 0) { b.recycle(); return null }
+            val m = (maxOf(r - l, btm - t) * 0.04f).toInt() + 2
+            l = maxOf(0, l - m); t = maxOf(0, t - m); r = minOf(w - 1, r + m); btm = minOf(h - 1, btm + m)
+            var out = android.graphics.Bitmap.createBitmap(b, l, t, r - l + 1, btm - t + 1)
+            val big = maxOf(out.width, out.height)
+            if (big > 2000) out = android.graphics.Bitmap.createScaledBitmap(out, out.width * 2000 / big, out.height * 2000 / big, true)
+            val dest = File(Storage.signatureDir(this), "sig_${System.currentTimeMillis()}.png")
+            ImageUtils.savePng(out, dest)
+            b.recycle()
+            dest
+        } catch (_: Throwable) { null }
+    }
+
     private fun crop(f: File) {
         cropLauncher.launch(CropActivity.intent(this, f, CropActivity.MODE_SIG))
     }
@@ -203,8 +242,7 @@ class SignaturesActivity : BaseActivity() {
 
     /** Picking: after a signature is chosen, its ink colour is chosen (with a live preview), then it's placed. */
     private fun returnSignature(f: File) {
-        SigColors.pick(this, "Choose ink colour", f, lastInk(), action = "Place signature") { ink ->
-            prefs.edit().putString("ink", ink.name).apply()
+        SigColors.pick(this, "Choose ink colour", f, InkColor.ORIGINAL, action = "Place") { ink ->
             setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_SIG, f.absolutePath).putExtra(EXTRA_INK, ink.name))
             finish()
         }
