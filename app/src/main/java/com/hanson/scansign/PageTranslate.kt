@@ -37,7 +37,6 @@ import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
 import com.tom_roush.pdfbox.pdmodel.graphics.image.JPEGFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -143,10 +142,16 @@ object PageTranslate {
         langBar.addView(toBtn, LinearLayout.LayoutParams(0, dp(54f), 1f))
         root.addView(langBar, LinearLayout.LayoutParams(-1, -2).apply { marginStart = dp(12f); marginEnd = dp(12f); bottomMargin = dp(10f) })
 
-        // ---- page picture
+        // ---- pages, one under another: scroll to move between them
         val stage = FrameLayout(a).apply { setBackgroundColor(Color.rgb(38, 38, 42)) }
-        val image = ZoomImage(a)
-        stage.addView(image, FrameLayout.LayoutParams(-1, -1))
+        val list = androidx.recyclerview.widget.RecyclerView(a).apply {
+            clipToPadding = false
+            setPadding(0, dp(8f), 0, dp(8f))
+            itemAnimator = null
+        }
+        val lm = androidx.recyclerview.widget.LinearLayoutManager(a)
+        list.layoutManager = lm
+        stage.addView(list, FrameLayout.LayoutParams(-1, -1))
         val badge = TextView(a).apply {
             textSize = 12f; setTextColor(Color.WHITE); setTypeface(typeface, Typeface.BOLD)
             setPadding(dp(12f), dp(5f), dp(12f), dp(5f))
@@ -155,7 +160,7 @@ object PageTranslate {
         }
         stage.addView(badge, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(12f) })
         val hint = TextView(a).apply {
-            text = "Hold the page to see the original"; textSize = 11.5f; setTextColor(Color.WHITE)
+            text = "Hold a page to see the original · tap to zoom"; textSize = 11.5f; setTextColor(Color.WHITE)
             setPadding(dp(10f), dp(4f), dp(10f), dp(4f))
             background = round(a, Color.argb(140, 0, 0, 0), 50f)
             visibility = View.GONE
@@ -165,6 +170,7 @@ object PageTranslate {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
             setPadding(dp(22f), dp(18f), dp(22f), dp(18f))
             background = round(a, Color.argb(225, 22, 22, 26), 20f)
+            visibility = View.GONE
         }
         val spinner = ProgressBar(a)
         busyBox.addView(spinner, LinearLayout.LayoutParams(dp(36f), dp(36f)))
@@ -186,11 +192,9 @@ object PageTranslate {
             row.addView(v, LinearLayout.LayoutParams(0, -2, 1f))
             return v
         }
-        val prev = if (pages.size > 1) tool("Previous", R.drawable.ic_chevron_left) else null
         val compare = tool("Original", R.drawable.ic_compare)
         val textBtn = tool("Text", R.drawable.ic_text)
         val shareBtn = tool("Share", R.drawable.ic_share)
-        val next = if (pages.size > 1) tool("Next", R.drawable.ic_chevron_right) else null
         fun setLabel(v: View, s: String) { v.findViewById<TextView>(R.id.toolLabel).text = s; v.contentDescription = s }
         fun enable(v: View?, on: Boolean) { v ?: return; v.isEnabled = on; v.alpha = if (on) 1f else 0.38f }
         bottom.addView(row)
@@ -221,19 +225,31 @@ object PageTranslate {
         var to = Translator.defaultTarget(a)
         var have: Set<String> = setOf("en")
         var haveLoaded = false
-        val cache = LinkedHashMap<Int, Result>()   // results for the current languages (a few pages)
-        var showing: Result? = null
+        val cache = LinkedHashMap<Int, Result>()   // full results of the last couple of pages
         var showOriginal = false
-        var job: Job? = null
-        val ahead = HashMap<Int, kotlinx.coroutines.Deferred<Result?>>()
+        var job: Job? = null          // saving
+        var worker: Job? = null       // translating the pages being looked at
+        var saving = false
+        var declined = false          // "Not now" to a download: stop asking until Download is tapped
         val session = Translator.Session()
 
-        fun labels(det: String?) {
+        /** A finished page: translated and original pictures kept on disk, so scrolling back is instant. */
+        class Done(val from: String?, val note: String?, val tFile: File?, val oFile: File?, val wPt: Float, val hPt: Float)
+        val done = HashMap<Int, Done>()
+        val working = HashMap<Int, String>()      // page → what is happening now
+        val liveDir = File(a.cacheDir, "translated/live").apply { deleteRecursively(); mkdirs() }
+        var gen = 0
+        val views = object : android.util.LruCache<String, Bitmap>(
+            min(48L * 1024 * 1024, Runtime.getRuntime().maxMemory() / 8).toInt()
+        ) { override fun sizeOf(key: String, value: Bitmap) = value.byteCount }
+
+        fun posOf(page: Int) = pages.indexOf(page)
+
+        fun labels() {
+            val det = done[pages[idx]]?.from
             fromName.text = if (from == AUTO) (det?.let { "${Translator.name(it)} (auto)" } ?: "Detect language") else Translator.name(from)
             toName.text = Translator.name(to)
             pagePill.text = if (pages.size > 1) "${idx + 1} / ${pages.size}" else "Page ${pages[idx] + 1}"
-            enable(prev, idx > 0)
-            enable(next, idx < pages.size - 1)
         }
 
         fun busy(msg: String?) {
@@ -247,23 +263,124 @@ object PageTranslate {
             busyAction.visibility = View.GONE
         }
 
-        fun display() {
-            val r = showing ?: return
-            val pic = if (showOriginal || r.translated == null) r.src?.bitmap else r.translated
-            if (pic != null) image.show(pic)
+        /** Updates the tools and the badge after pages finish or the view mode changes. */
+        fun tools() {
+            val any = done.values.any { it.tFile != null }
             setLabel(compare, if (showOriginal) "Translated" else "Original")
-            enable(compare, r.translated != null)
-            badge.visibility = if (r.translated != null) View.VISIBLE else View.GONE
-            if (r.translated != null && !showOriginal && hint.tag == null) {
-                hint.tag = true; hint.visibility = View.VISIBLE
-                hint.postDelayed({ hint.visibility = View.GONE }, 4000)
-            }
+            enable(compare, any)
+            badge.visibility = if (any) View.VISIBLE else View.GONE
             badge.text = if (showOriginal) "Original" else "Translated to ${Translator.name(to)}"
-            labels(r.from)
+            if (any && !showOriginal && hint.tag == null) {
+                hint.tag = true; hint.visibility = View.VISIBLE
+                hint.postDelayed({ hint.visibility = View.GONE }, 4500)
+            }
+            labels()
         }
 
+        fun decode(f: File, maxW: Int): Bitmap? = try {
+            val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeFile(f.absolutePath, o)
+            var s = 1
+            while (maxW > 0 && o.outWidth / (s * 2) >= maxW) s *= 2
+            android.graphics.BitmapFactory.decodeFile(f.absolutePath, android.graphics.BitmapFactory.Options().apply { inSampleSize = s })
+        } catch (_: Throwable) { null }
+
+        var retryDownloads: (() -> Unit)? = null
+
+        // ---- one row per page
+        class VH(val card: FrameLayout, val pic: ImageView, val wait: LinearLayout, val waitText: TextView,
+                 val num: TextView, val noteBox: LinearLayout, val noteText: TextView, val noteAction: MaterialButton) :
+            androidx.recyclerview.widget.RecyclerView.ViewHolder(card)
+
+        val adapter = object : androidx.recyclerview.widget.RecyclerView.Adapter<VH>() {
+            override fun getItemCount() = pages.size
+            override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
+                val card = FrameLayout(a).apply {
+                    setBackgroundColor(Color.WHITE)
+                    layoutParams = androidx.recyclerview.widget.RecyclerView.LayoutParams(-1, -2).apply {
+                        setMargins(dp(10f), dp(6f), dp(10f), dp(6f))
+                    }
+                    elevation = dp(2f).toFloat()
+                }
+                val pic = ImageView(a).apply { scaleType = ImageView.ScaleType.FIT_CENTER; adjustViewBounds = false }
+                card.addView(pic, FrameLayout.LayoutParams(-1, -1))
+                val wait = LinearLayout(a).apply {
+                    orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
+                    setPadding(dp(20f), dp(16f), dp(20f), dp(16f))
+                    background = round(a, Color.argb(225, 22, 22, 26), 18f)
+                }
+                wait.addView(ProgressBar(a), LinearLayout.LayoutParams(dp(30f), dp(30f)))
+                val waitText = TextView(a).apply { textSize = 13f; setTextColor(Color.WHITE); gravity = Gravity.CENTER; setPadding(0, dp(8f), 0, 0) }
+                wait.addView(waitText, LinearLayout.LayoutParams(-2, -2))
+                card.addView(wait, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER).apply { marginStart = dp(24f); marginEnd = dp(24f) })
+                val num = TextView(a).apply {
+                    textSize = 11.5f; setTextColor(Color.WHITE); setTypeface(typeface, Typeface.BOLD)
+                    setPadding(dp(9f), dp(3f), dp(9f), dp(3f))
+                    background = round(a, Color.argb(150, 0, 0, 0), 50f)
+                }
+                card.addView(num, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply { topMargin = dp(8f); marginStart = dp(8f) })
+                val noteBox = LinearLayout(a).apply {
+                    orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
+                    setPadding(dp(16f), dp(12f), dp(16f), dp(12f))
+                    background = round(a, Color.argb(230, 22, 22, 26), 16f)
+                }
+                val noteText = TextView(a).apply { textSize = 13f; setTextColor(Color.WHITE); gravity = Gravity.CENTER }
+                noteBox.addView(noteText, LinearLayout.LayoutParams(-2, -2))
+                val noteAction = MaterialButton(a).apply { text = "Download" }
+                noteBox.addView(noteAction, LinearLayout.LayoutParams(-2, dp(44f)).apply { topMargin = dp(8f) })
+                card.addView(noteBox, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+                    bottomMargin = dp(14f); marginStart = dp(16f); marginEnd = dp(16f)
+                })
+                return VH(card, pic, wait, waitText, num, noteBox, noteText, noteAction)
+            }
+
+            override fun onBindViewHolder(holder: VH, position: Int) {
+                val page = pages[position]
+                val d = done[page]
+                val w = (if (list.width > 0) list.width else a.resources.displayMetrics.widthPixels) - dp(20f)
+                val ratio = if (d != null && d.wPt > 0f) d.hPt / d.wPt else 1.414f
+                holder.card.layoutParams = holder.card.layoutParams.apply { height = (w * ratio).toInt() }
+                holder.num.text = "${page + 1}"
+                holder.num.visibility = if (pages.size > 1) View.VISIBLE else View.GONE
+                if (d == null) {
+                    holder.pic.tag = null
+                    holder.pic.setImageDrawable(null)
+                    holder.wait.visibility = View.VISIBLE
+                    holder.waitText.text = working[page] ?: "Waiting to translate…"
+                    holder.noteBox.visibility = View.GONE
+                    return
+                }
+                holder.wait.visibility = View.GONE
+                if (d.note != null) {
+                    holder.noteBox.visibility = View.VISIBLE
+                    holder.noteText.text = d.note
+                    val dl = d.note.contains("isn't downloaded")
+                    holder.noteAction.visibility = if (dl) View.VISIBLE else View.GONE
+                    holder.noteAction.setOnClickListener { retryDownloads?.invoke() }
+                } else holder.noteBox.visibility = View.GONE
+                val f = if (showOriginal || d.tFile == null) d.oFile else d.tFile
+                if (f == null) { holder.pic.setImageDrawable(null); return }
+                val key = f.absolutePath
+                holder.pic.tag = key
+                val hit = views.get(key)
+                if (hit != null) { holder.pic.setImageBitmap(hit); return }
+                holder.pic.setImageDrawable(null)
+                a.lifecycleScope.launch {
+                    val b = withContext(Dispatchers.IO) { decode(f, w) } ?: return@launch
+                    views.put(key, b)
+                    if (holder.pic.tag == key) holder.pic.setImageBitmap(b)
+                }
+            }
+        }
+        list.adapter = adapter
+
+        fun refresh(page: Int) { val p = posOf(page); if (p >= 0) adapter.notifyItemChanged(p) }
+
         /** Asks before a one-time language download. */
+        var asking = false
         suspend fun askDownload(missing: List<String>): Boolean = suspendCancellableCoroutine { cont ->
+            asking = true
+            cont.invokeOnCancellation { asking = false }
             val names = missing.joinToString(" and ") { Translator.name(it) }
             MaterialAlertDialogBuilder(a)
                 .setTitle("Download $names?")
@@ -271,6 +388,7 @@ object PageTranslate {
                 .setPositiveButton("Download") { _, _ -> if (cont.isActive) cont.resume(true) }
                 .setNegativeButton("Not now") { _, _ -> if (cont.isActive) cont.resume(false) }
                 .setOnCancelListener { if (cont.isActive) cont.resume(false) }
+                .setOnDismissListener { asking = false }
                 .show()
         }
 
@@ -363,71 +481,203 @@ object PageTranslate {
             val r = Result(src, painted, lang, null)
             synchronized(cache) {
                 cache[page] = r
-                while (cache.size > 4) cache.remove(cache.keys.first())
+                while (cache.size > 2) cache.remove(cache.keys.first())
             }
             return r
         }
 
-        /** Reads ahead: translates the next page in the background while this one is read. */
-        fun prefetch() {
-            if (idx + 1 >= pages.size) return
-            val page = pages[idx + 1]
-            if (synchronized(cache) { cache.containsKey(page) } || ahead.containsKey(page)) return
-            ahead[page] = a.lifecycleScope.async {
-                try { translate(page, false) {} } catch (e: Throwable) { if (e is kotlinx.coroutines.CancellationException) throw e; null }
+        /** Keeps a finished page on disk and shows it in the list. */
+        suspend fun record(page: Int, r: Result, g: Int) {
+            val src = r.src
+            val saved = withContext(Dispatchers.IO) {
+                try {
+                    val o = src?.let { s -> File(liveDir, "g$g-p$page-o.jpg").also { f -> f.outputStream().use { s.bitmap.compress(Bitmap.CompressFormat.JPEG, 88, it) } } }
+                    val t = r.translated?.let { b -> File(liveDir, "g$g-p$page-t.jpg").also { f -> f.outputStream().use { b.compress(Bitmap.CompressFormat.JPEG, 90, it) } } }
+                    Pair(o, t)
+                } catch (_: Throwable) { Pair(null, null) }
+            }
+            if (g != gen) return
+            done[page] = Done(r.from, r.note, saved.second, saved.first, src?.wPt ?: 0f, src?.hPt ?: 0f)
+            working.remove(page)
+            refresh(page)
+            tools()
+        }
+
+        /** The page shown in the middle of the screen becomes the current page. */
+        fun track() {
+            val f = lm.findFirstVisibleItemPosition()
+            val l = lm.findLastVisibleItemPosition()
+            if (f < 0) return
+            var best = f
+            if (l > f) {
+                val mid = list.height / 2
+                for (p in f..l) {
+                    val v = lm.findViewByPosition(p) ?: continue
+                    if (v.top <= mid && v.bottom >= mid) { best = p; break }
+                }
+            }
+            if (best != idx) { idx = best; labels() }
+        }
+
+        /** Next page to translate: the ones on screen first, then the one just below. */
+        fun nextPos(): Int? {
+            var f = lm.findFirstVisibleItemPosition()
+            var l = lm.findLastVisibleItemPosition()
+            if (f < 0) { f = idx; l = idx }
+            val order = (listOf(idx) + (f..l) + listOf(l + 1)).filter { it in pages.indices }.distinct()
+            return order.firstOrNull { !done.containsKey(pages[it]) }
+        }
+
+        /** Translates the pages being looked at, one at a time, as the user scrolls. */
+        fun kick() {
+            if (saving || worker?.isActive == true) return
+            val g = gen
+            worker = a.lifecycleScope.launch {
+                while (isActive && g == gen) {
+                    val pos = nextPos() ?: break
+                    val page = pages[pos]
+                    val f = lm.findFirstVisibleItemPosition(); val l = lm.findLastVisibleItemPosition()
+                    val onScreen = f < 0 || pos in f..l
+                    working[page] = "Reading the page…"; refresh(page)
+                    val r0 = try {
+                        translate(page, onScreen && !declined) { s -> if (g == gen && working.containsKey(page)) { working[page] = s; refresh(page) } }
+                    } catch (e: Throwable) {
+                        if (e is kotlinx.coroutines.CancellationException) { working.remove(page); throw e }
+                        Result(null, null, null, "Couldn't translate this page. Please try again.")
+                    }
+                    // reading ahead never asks to download: tell the user on the page instead
+                    val r = if (r0.src != null && r0.translated == null && r0.note == null)
+                        Result(r0.src, null, r0.from, "The language pack isn't downloaded yet.") else r0
+                    if (r.note?.contains("isn't downloaded") == true) declined = true
+                    record(page, r, g)
+                }
             }
         }
 
-        fun run() {
-            job?.cancel()
-            labels(null)
-            showOriginal = false
-            val page = pages[idx]
-            job = a.lifecycleScope.launch {
-                busy("Reading the page…")
-                val early = ahead.remove(page)?.let { d -> busy("Translating…"); try { d.await() } catch (e: Throwable) { if (e is kotlinx.coroutines.CancellationException) throw e; null } }
-                val r = early?.takeIf { it.translated != null } ?: translate(page, true) { busy(it) }
-                showing = r
-                busy(null)
-                display()
-                if (r.note != null) {
-                    note(r.note)
-                    if (r.note.contains("isn't downloaded")) {
-                        busyAction.visibility = View.VISIBLE; busyAction.text = "Download"
-                        busyAction.setOnClickListener { run() }
-                    }
-                } else prefetch()
-            }
+        retryDownloads = {
+            declined = false
+            done.entries.removeAll { it.value.note?.contains("isn't downloaded") == true }
+            adapter.notifyDataSetChanged()
+            worker?.cancel(); worker = null
+            kick()
         }
 
         fun changed() {
-            ahead.values.forEach { it.cancel() }; ahead.clear()
+            gen++
+            worker?.cancel(); worker = null
             synchronized(cache) { cache.clear() }
-            run()
+            done.clear(); working.clear(); views.evictAll(); declined = false
+            Thread { liveDir.listFiles()?.forEach { it.delete() } }.start()
+            showOriginal = false
+            adapter.notifyDataSetChanged()
+            tools()
+            kick()
         }
 
-        fun pick(title: String, allowAuto: Boolean, current: String, done: (String) -> Unit) =
-            TranslateSheet.pickLanguage(a, title, allowAuto, current, have, done)
+        list.addOnScrollListener(object : androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
+            override fun onScrolled(rv: androidx.recyclerview.widget.RecyclerView, dx: Int, dy: Int) { track() }
+            override fun onScrollStateChanged(rv: androidx.recyclerview.widget.RecyclerView, newState: Int) {
+                if (newState == androidx.recyclerview.widget.RecyclerView.SCROLL_STATE_IDLE) {
+                    track()
+                    // jumped far away: start with the pages now on screen
+                    val p = pages[idx]
+                    if (!asking && !done.containsKey(p) && !working.containsKey(p)) { worker?.cancel(); worker = null }
+                    kick()
+                }
+            }
+        })
+
+        /** Full screen view of one page with pinch zoom; hold to see the original. */
+        fun zoom(page: Int) {
+            val d = done[page] ?: return
+            val z = Dialog(a, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+            val box = FrameLayout(a).apply { setBackgroundColor(Color.rgb(20, 20, 22)) }
+            val img = ZoomImage(a)
+            box.addView(img, FrameLayout.LayoutParams(-1, -1))
+            val x = ImageButton(a).apply {
+                setImageResource(R.drawable.ic_close); setColorFilter(Color.WHITE); contentDescription = "Close"
+                background = round(a, Color.argb(150, 0, 0, 0), 24f)
+                setOnClickListener { z.dismiss() }
+            }
+            box.addView(x, FrameLayout.LayoutParams(dp(44f), dp(44f), Gravity.TOP or Gravity.END).apply { topMargin = dp(16f); marginEnd = dp(16f) })
+            val cap = TextView(a).apply {
+                textSize = 12f; setTextColor(Color.WHITE); setTypeface(typeface, Typeface.BOLD)
+                setPadding(dp(12f), dp(5f), dp(12f), dp(5f))
+                background = round(a, Color.argb(160, 0, 0, 0), 50f)
+            }
+            box.addView(cap, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(24f) })
+            z.setContentView(box)
+            z.show()
+            a.lifecycleScope.launch {
+                val t = d.tFile?.let { f -> withContext(Dispatchers.IO) { decode(f, 0) } }
+                val o = d.oFile?.let { f -> withContext(Dispatchers.IO) { decode(f, 0) } }
+                val first = (if (showOriginal) o else t) ?: o ?: t ?: return@launch
+                img.show(first)
+                cap.text = if (first === t) "Page ${page + 1} · hold to see the original" else "Page ${page + 1} · original"
+                img.onHold = { hold ->
+                    if (t != null && o != null) {
+                        val b = if (hold != showOriginal) o else t
+                        img.show(b)
+                        cap.text = if (b === o) "Page ${page + 1} · original" else "Page ${page + 1} · translated"
+                    }
+                }
+            }
+        }
+
+        // tap a page to zoom; hold it to see the original
+        list.addOnItemTouchListener(object : androidx.recyclerview.widget.RecyclerView.SimpleOnItemTouchListener() {
+            var held: VH? = null
+            val gd = GestureDetector(a, object : GestureDetector.SimpleOnGestureListener() {
+                override fun onSingleTapUp(e: MotionEvent): Boolean {
+                    val v = list.findChildViewUnder(e.x, e.y) ?: return false
+                    val p = list.getChildAdapterPosition(v)
+                    if (p in pages.indices) zoom(pages[p])
+                    return true
+                }
+                override fun onLongPress(e: MotionEvent) {
+                    val v = list.findChildViewUnder(e.x, e.y) ?: return
+                    val vh = list.getChildViewHolder(v) as? VH ?: return
+                    val p = list.getChildAdapterPosition(v)
+                    val d = if (p in pages.indices) done[pages[p]] else null
+                    val other = (if (showOriginal) d?.tFile else d?.oFile) ?: return
+                    if (d?.tFile == null) return
+                    held = vh
+                    val w = vh.pic.width
+                    a.lifecycleScope.launch {
+                        val b = views.get(other.absolutePath) ?: withContext(Dispatchers.IO) { decode(other, w) }?.also { views.put(other.absolutePath, it) }
+                        if (b != null && held === vh) { vh.pic.tag = other.absolutePath; vh.pic.setImageBitmap(b) }
+                    }
+                }
+            })
+            override fun onInterceptTouchEvent(rv: androidx.recyclerview.widget.RecyclerView, e: MotionEvent): Boolean {
+                gd.onTouchEvent(e)
+                if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) {
+                    held?.let { vh -> held = null; val p = vh.bindingAdapterPosition; if (p in pages.indices) adapter.notifyItemChanged(p) }
+                }
+                return false
+            }
+        })
+
+        fun pick(title: String, allowAuto: Boolean, current: String, onPick: (String) -> Unit) =
+            TranslateSheet.pickLanguage(a, title, allowAuto, current, have, onPick)
 
         fromBtn.setOnClickListener { pick("Translate from", true, from) { from = it; changed() } }
         toBtn.setOnClickListener { pick("Translate to", false, to) { to = it; Translator.rememberTarget(a, it); changed() } }
         swap.setOnClickListener {
-            val src = if (from == AUTO) showing?.from else from
+            val src = if (from == AUTO) done[pages[idx]]?.from else from
             if (src != null && src != to) { from = to; to = src; Translator.rememberTarget(a, to); changed() }
         }
-        prev?.setOnClickListener { if (idx > 0) { idx--; run() } }
-        next?.setOnClickListener { if (idx < pages.size - 1) { idx++; run() } }
-        compare.setOnClickListener { showOriginal = !showOriginal; display() }
-        image.onHold = { hold -> if (showing?.translated != null) { showOriginal = hold; display() } }
+        compare.setOnClickListener { showOriginal = !showOriginal; adapter.notifyDataSetChanged(); tools() }
         textBtn.setOnClickListener { val page = pages[idx]; TranslateSheet.show(a, "Page ${page + 1}") { pageText(page) } }
         shareBtn.setOnClickListener {
-            val r = showing ?: return@setOnClickListener
-            val pic = r.translated ?: r.src?.bitmap ?: return@setOnClickListener
+            val page = pages[idx]
+            val d = done[page] ?: return@setOnClickListener
+            val pic = d.tFile ?: d.oFile ?: return@setOnClickListener
             a.lifecycleScope.launch {
                 val f = withContext(Dispatchers.IO) {
                     try {
                         val dir = File(a.cacheDir, "translated").apply { mkdirs() }
-                        File(dir, "page-${pages[idx] + 1}-${to}.jpg").also { f -> f.outputStream().use { pic.compress(Bitmap.CompressFormat.JPEG, 90, it) } }
+                        File(dir, "page-${page + 1}-${to}.jpg").also { f -> pic.copyTo(f, overwrite = true) }
                     } catch (_: Throwable) { null }
                 } ?: return@launch
                 a.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
@@ -438,12 +688,13 @@ object PageTranslate {
             }
         }
 
-        var saving = false
         val saveLabel = saveBtn.text
         saveBtn.setOnClickListener {
             if (saving) { job?.cancel(); return@setOnClickListener }   // "Stop"
             job?.cancel()
-            ahead.values.forEach { it.cancel() }; ahead.clear()
+            worker?.cancel(); worker = null
+            working.clear(); adapter.notifyDataSetChanged()
+            val g = gen
             job = a.lifecycleScope.launch {
                 saving = true
                 saveBtn.text = "Stop"
@@ -463,18 +714,28 @@ object PageTranslate {
                             }
                             val tag = if (pages.size > 1) "Page ${n + 1} of ${pages.size}$left\n" else ""
                             busy("${tag}Reading the page…")
-                            val r = translate(page, true) { busy(tag + it) }
-                            if (r.note != null && r.note.contains("isn't downloaded")) { busy(null); note(r.note); return@launch }
-                            val src = r.src ?: continue
-                            val pic = r.translated ?: src.bitmap
-                            if (r.translated != null) translatedAny = true
+                            // pages already translated while scrolling are reused
+                            val d = done[page]?.takeIf { it.wPt > 0f && (it.tFile != null || it.note?.contains("isn't downloaded") != true) }
+                            val wPt: Float; val hPt: Float; val pic: Bitmap
+                            if (d != null) {
+                                pic = withContext(Dispatchers.IO) { (d.tFile ?: d.oFile)?.let { decode(it, 0) } } ?: continue
+                                wPt = d.wPt; hPt = d.hPt
+                                if (d.tFile != null) translatedAny = true
+                            } else {
+                                val r = translate(page, true) { busy(tag + it) }
+                                if (r.note != null && r.note.contains("isn't downloaded")) { busy(null); note(r.note); return@launch }
+                                val src = r.src ?: continue
+                                pic = r.translated ?: src.bitmap
+                                wPt = src.wPt; hPt = src.hPt
+                                if (r.translated != null) translatedAny = true
+                                record(page, r, g)
+                            }
                             withContext(Dispatchers.IO) {
-                                val pg = PDPage(PDRectangle(src.wPt, src.hPt))
+                                val pg = PDPage(PDRectangle(wPt, hPt))
                                 pd.addPage(pg)
                                 val img = JPEGFactory.createFromImage(pd, pic, 0.86f)
-                                PDPageContentStream(pd, pg).use { it.drawImage(img, 0f, 0f, src.wPt, src.hPt) }
+                                PDPageContentStream(pd, pg).use { it.drawImage(img, 0f, 0f, wPt, hPt) }
                             }
-                            if (page == pages[idx]) { showing = r; display() }
                         }
                         if (!translatedAny) { busy(null); note("Nothing to translate in this document."); return@launch }
                         busy("Saving…")
@@ -494,7 +755,7 @@ object PageTranslate {
                         try { pd.close() } catch (_: Throwable) {}
                     }
                 } catch (e: Throwable) {
-                    if (e is kotlinx.coroutines.CancellationException) { busy(null); note("Stopped. Nothing was saved."); throw e }
+                    if (e is kotlinx.coroutines.CancellationException) { busy(null); note("Stopped. Nothing was saved."); busyBox.postDelayed({ if (!saving) busy(null) }, 2500); throw e }
                     busy(null)
                     note("Couldn't save the PDF. Please try again.")
                 } finally {
@@ -502,17 +763,21 @@ object PageTranslate {
                     saveBtn.text = saveLabel
                     saveBtn.setIconResource(R.drawable.ic_save_as)
                     dlg.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    if (dlg.isShowing) list.post { kick() }
                 }
             }
         }
 
         dlg.setOnDismissListener {
-            job?.cancel()
-            ahead.values.forEach { it.cancel() }; ahead.clear()
-            Thread { session.close() }.start()
+            job?.cancel(); worker?.cancel()
+            views.evictAll()
+            Thread { session.close(); liveDir.deleteRecursively() }.start()
         }
         dlg.show()
-        run()
+        labels()
+        tools()
+        if (idx > 0) lm.scrollToPositionWithOffset(idx, 0)
+        list.post { kick() }
     }
 
     private fun round(a: Context, color: Int, radiusDp: Float) = android.graphics.drawable.GradientDrawable().apply {
