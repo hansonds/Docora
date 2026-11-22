@@ -252,14 +252,19 @@ class ScanActivity : BaseActivity() {
         lifecycleScope.launch {
             val origs = withContext(Dispatchers.IO) { uris.mapNotNull { u -> Storage.copyUriToWork(this@ScanActivity, u, "jpg") } }
             if (origs.isEmpty()) { hideBusy(); return@launch }
-            // first pages of a new document: let the user pick the look, then use it for every page
-            val filter = ScanSession.filter ?: chooseFilter(origs[0]).also { ScanSession.filter = it }
-            showBusy("Processing…", "Applying ${filter.label}" + if (origs.size > 1) " · page 1 of ${origs.size}" else "")
+            // first pages of a new document: let the user pick the look, then use it for every page.
+            // The AI scanner has already cleaned the pages, so "As scanned" is the default.
+            val filter = ScanSession.filter ?: (if (App.openCvReady) chooseFilter(origs[0], ScanFilter.ORIGINAL) else {
+                Toast.makeText(this@ScanActivity, "Page looks aren't available on this phone — pages are kept as scanned", Toast.LENGTH_LONG).show()
+                ScanFilter.ORIGINAL
+            }).also { ScanSession.filter = it }
+            val lookName = if (filter == ScanFilter.ORIGINAL) "As scanned" else filter.label
+            showBusy("Processing…", "Applying $lookName" + if (origs.size > 1) " · page 1 of ${origs.size}" else "")
             var done = 0
             val pages = withContext(Dispatchers.IO) {
                 origs.mapNotNull { orig ->
                     done++
-                    if (origs.size > 1) runOnUiThread { busyText?.text = "Applying ${filter.label} · page $done of ${origs.size}" }
+                    if (origs.size > 1) runOnUiThread { busyText?.text = "Applying $lookName · page $done of ${origs.size}" }
                     if (filter == ScanFilter.ORIGINAL) return@mapNotNull ScanPage(orig, orig)
                     val bmp = ImageUtils.load(orig) ?: return@mapNotNull ScanPage(orig, orig)
                     val out = Storage.newWorkFile(this@ScanActivity, "jpg")
@@ -280,8 +285,9 @@ class ScanActivity : BaseActivity() {
      * Shows the first page in every look side by side and returns the one picked
      * (closing the picker keeps the default from Settings).
      */
-    private suspend fun chooseFilter(sample: File): ScanFilter {
-        val def = Settings.defaultFilter(this)
+    private suspend fun chooseFilter(sample: File, preferred: ScanFilter? = null): ScanFilter {
+        val def = preferred ?: Settings.defaultFilter(this)
+        fun name(f: ScanFilter) = if (f == ScanFilter.ORIGINAL && preferred == ScanFilter.ORIGINAL) "As scanned" else f.label
         showBusy("Preparing looks…", "Showing your page in every style")
         val previews = withContext(Dispatchers.Default) {
             val small = ImageUtils.load(sample, 520) ?: return@withContext null
@@ -320,7 +326,7 @@ class ScanActivity : BaseActivity() {
                         setBackgroundColor(Ui.surfaceVariant(this@ScanActivity))
                     }, LinearLayout.LayoutParams(-1, (130 * d).toInt()))
                     inner.addView(TextView(this).apply {
-                        text = if (f == def) "${f.label} ★" else f.label
+                        text = if (f == def) "${name(f)} ★" else name(f)
                         textSize = 12.5f; gravity = android.view.Gravity.CENTER
                         setTypeface(typeface, if (f == def) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
                         setPadding(0, (6 * d).toInt(), 0, 0)
@@ -334,7 +340,7 @@ class ScanActivity : BaseActivity() {
             dialog = MaterialAlertDialogBuilder(this)
                 .setTitle("Choose a look for this document")
                 .setView(android.widget.ScrollView(this).apply { addView(grid) })
-                .setNegativeButton("Use ${def.label}") { _, _ -> picked = def }
+                .setNegativeButton("Use ${name(def)}") { _, _ -> picked = def }
                 .setOnDismissListener { if (cont.isActive) cont.resume(picked ?: def) }
                 .show()
             cont.invokeOnCancellation { try { dialog?.dismiss() } catch (_: Throwable) {} }

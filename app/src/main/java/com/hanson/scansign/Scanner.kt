@@ -20,7 +20,7 @@ import kotlin.math.roundToInt
 enum class ScanFilter(val label: String) {
     AUTO("Auto"),
     ORIGINAL("Original"),
-    MAGIC("Magic color"),
+    MAGIC("Magic colour"),
     GRAY("Grayscale"),
     BW("Black & white")
 }
@@ -137,10 +137,11 @@ object Scanner {
             ScanFilter.GRAY -> {
                 val g = Mat()
                 Imgproc.cvtColor(rgba, g, Imgproc.COLOR_RGBA2GRAY)
-                // mild contrast stretch
-                Core.normalize(g, g, 0.0, 255.0, Core.NORM_MINMAX)
-                Imgproc.cvtColor(g, result, Imgproc.COLOR_GRAY2RGBA)
-                g.release()
+                // shadows and uneven light removed (like the other looks), then a little contrast
+                val flat = flattenLighting(g)
+                flat.convertTo(flat, -1, 1.1, -12.0)
+                Imgproc.cvtColor(flat, result, Imgproc.COLOR_GRAY2RGBA)
+                g.release(); flat.release()
             }
             ScanFilter.BW -> {
                 val g = Mat()
@@ -173,22 +174,9 @@ object Scanner {
                 magic.release()
             }
             ScanFilter.MAGIC -> {
-                val rgb = Mat()
-                Imgproc.cvtColor(rgba, rgb, Imgproc.COLOR_RGBA2RGB)
-                val channels = ArrayList<Mat>()
-                Core.split(rgb, channels)
-                val outCh = ArrayList<Mat>()
-                for (ch in channels) {
-                    outCh.add(flattenLighting(ch))
-                    ch.release()
-                }
-                val merged = Mat()
-                Core.merge(outCh, merged)
-                // a touch more contrast / saturation
-                merged.convertTo(merged, -1, 1.15, -18.0)
-                Imgproc.cvtColor(merged, result, Imgproc.COLOR_RGB2RGBA)
-                outCh.forEach { it.release() }
-                rgb.release(); merged.release()
+                val magic = magicColor(rgba)
+                Imgproc.cvtColor(magic, result, Imgproc.COLOR_RGB2RGBA)
+                magic.release()
             }
             ScanFilter.ORIGINAL -> rgba.copyTo(result)
         }
