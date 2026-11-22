@@ -42,14 +42,55 @@ import java.io.File
 /** One scanned page: the original photo (for re-cropping) and the processed page image. */
 data class ScanPage(val original: File, var page: File)
 
-/** Pages of the document being scanned. Lives as long as the app process. */
+/**
+ * Pages of the document being scanned. Kept on disk too, so "Keep for later" still works after
+ * the phone closes Docora in the background.
+ */
 object ScanSession {
     val pages = ArrayList<ScanPage>()
     /** The look chosen on the first page; every page of this document uses it (null = not chosen yet). */
     var filter: ScanFilter? = null
+    private var restored = false
+
+    private fun prefs(c: Context) = c.getSharedPreferences("scan_session", Context.MODE_PRIVATE)
 
     /** Starts a new document. */
-    fun reset() { pages.clear(); filter = null }
+    fun reset(c: Context? = null) { pages.clear(); filter = null; c?.let { save(it) } }
+
+    /** Remembers the pages (paths only) and the chosen look. */
+    fun save(c: Context) {
+        val arr = org.json.JSONArray()
+        for (p in pages) arr.put(org.json.JSONArray().put(p.original.absolutePath).put(p.page.absolutePath))
+        prefs(c).edit().putString("pages", arr.toString()).putString("filter", filter?.name).apply()
+    }
+
+    /** Brings back kept pages after Docora was closed. Returns how many pages had gone missing. */
+    fun restore(c: Context): Int {
+        if (restored || pages.isNotEmpty()) { restored = true; return 0 }
+        restored = true
+        var missing = 0
+        try {
+            val arr = org.json.JSONArray(prefs(c).getString("pages", "[]"))
+            for (i in 0 until arr.length()) {
+                val e = arr.getJSONArray(i)
+                val o = File(e.getString(0)); val p = File(e.getString(1))
+                if (p.exists()) pages.add(ScanPage(if (o.exists()) o else p, p)) else missing++
+            }
+            filter = prefs(c).getString("filter", null)?.let { n -> ScanFilter.values().firstOrNull { it.name == n } }
+        } catch (_: Throwable) {}
+        return missing
+    }
+
+    /** Every file the kept pages use (so cleaning temporary files never removes them). */
+    fun files(c: Context): Set<String> {
+        val out = HashSet<String>()
+        for (p in pages) { out.add(p.original.absolutePath); out.add(p.page.absolutePath) }
+        try {
+            val arr = org.json.JSONArray(prefs(c).getString("pages", "[]"))
+            for (i in 0 until arr.length()) { val e = arr.getJSONArray(i); out.add(e.getString(0)); out.add(e.getString(1)) }
+        } catch (_: Throwable) {}
+        return out
+    }
 }
 
 class ScanActivity : BaseActivity() {
@@ -143,6 +184,8 @@ class ScanActivity : BaseActivity() {
             override fun handleOnBackPressed() = confirmLeave()
         })
 
+        val missing = ScanSession.restore(this)
+        if (missing > 0) Toast.makeText(this, "$missing kept page(s) were removed by the phone's storage cleanup", Toast.LENGTH_LONG).show()
         if (savedInstanceState != null) {
             editIndex = savedInstanceState.getInt(STATE_EDIT_INDEX, -1)
         } else {
@@ -185,7 +228,7 @@ class ScanActivity : BaseActivity() {
             .setMessage("Your pages stay here until you save or discard them.")
             .setPositiveButton("Keep for later") { _, _ -> finish() }
             .setNegativeButton("Discard pages") { _, _ ->
-                ScanSession.reset()
+                ScanSession.reset(this)
                 finish()
             }
             .setNeutralButton("Stay", null)
@@ -405,7 +448,9 @@ class ScanActivity : BaseActivity() {
 
     private fun refreshEmpty() {
         empty.visibility = if (ScanSession.pages.isEmpty() && !busy) View.VISIBLE else View.GONE
-        title = if (ScanSession.pages.isEmpty()) "New scan" else "New scan · ${ScanSession.pages.size} page(s)"
+        val n = ScanSession.pages.size
+        title = when (n) { 0 -> "New scan"; 1 -> "New scan · 1 page"; else -> "New scan · $n pages" }
+        ScanSession.save(this)
     }
 
     private fun pageMenu(anchor: View, index: Int) {
@@ -428,17 +473,28 @@ class ScanActivity : BaseActivity() {
                 2 -> rotatePage(index)
                 3 -> if (index > 0) {
                     java.util.Collections.swap(pages, index, index - 1)
-                    adapter.notifyDataSetChanged()
+                    adapter.notifyItemMoved(index, index - 1)
+                    adapter.notifyItemRangeChanged(index - 1, 2)
+                    refreshEmpty()
                 }
                 4 -> if (index < pages.size - 1) {
                     java.util.Collections.swap(pages, index, index + 1)
-                    adapter.notifyDataSetChanged()
-                }
-                5 -> {
-                    pages.removeAt(index)
-                    adapter.notifyDataSetChanged()
+                    adapter.notifyItemMoved(index, index + 1)
+                    adapter.notifyItemRangeChanged(index, 2)
                     refreshEmpty()
                 }
+                5 -> MaterialAlertDialogBuilder(this)
+                    .setTitle("Delete page ${index + 1}?")
+                    .setPositiveButton("Delete") { _, _ ->
+                        if (index in pages.indices) {
+                            pages.removeAt(index)
+                            adapter.notifyItemRemoved(index)
+                            adapter.notifyItemRangeChanged(index, pages.size - index)
+                            refreshEmpty()
+                        }
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
             }
             true
         }
@@ -449,18 +505,28 @@ class ScanActivity : BaseActivity() {
         val page = ScanSession.pages[index]
         progress.visibility = View.VISIBLE
         lifecycleScope.launch {
-            val out = withContext(Dispatchers.Default) {
-                val bmp = ImageUtils.load(page.page) ?: return@withContext null
+            fun turn(src: File): File? {
+                val bmp = ImageUtils.load(src) ?: return null
                 val r = ImageUtils.rotate(bmp, 90f)
                 val f = Storage.newWorkFile(this@ScanActivity, "jpg")
                 ImageUtils.saveJpeg(r, f, 92)
                 r.recycle()
-                f
+                return f
+            }
+            val turned = withContext(Dispatchers.Default) {
+                val p = turn(page.page) ?: return@withContext null
+                // the original turns too, so re-cropping later keeps the new orientation
+                val o = if (page.original.absolutePath == page.page.absolutePath) p else (turn(page.original) ?: page.original)
+                Pair(o, p)
             }
             progress.visibility = View.GONE
-            if (out != null) {
-                page.page = out
-                adapter.notifyItemChanged(index)
+            if (turned != null) {
+                val i = ScanSession.pages.indexOf(page)
+                if (i >= 0) {
+                    ScanSession.pages[i] = ScanPage(turned.first, turned.second)
+                    adapter.notifyItemChanged(i)
+                    refreshEmpty()
+                }
             }
         }
     }
@@ -519,27 +585,38 @@ class ScanActivity : BaseActivity() {
             .show()
     }
 
+    private var saving = false
+
     private fun savePdf(name: String, size: PageSize, quality: Quality, margin: Boolean, layout: Layout, searchable: Boolean) {
-        progress.visibility = View.VISIBLE
+        if (saving) return
+        saving = true
+        val saveBtn = findViewById<View>(R.id.btnSave)
+        saveBtn.isEnabled = false
         val images = ScanSession.pages.map { it.page }
+        val what = if (searchable) "Creating PDF and reading the text…" else "Creating PDF…"
+        showBusy(what, if (images.size == 1) "1 page" else "page 1 of ${images.size}")
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
                 try {
                     val out = Storage.uniquePdf(this@ScanActivity, name)
-                    PdfTools.imagesToPdf(this@ScanActivity, images, out, size, quality, margin, layout, searchable)
+                    PdfTools.imagesToPdf(this@ScanActivity, images, out, size, quality, margin, layout, searchable) { done, total ->
+                        if (total > 1) runOnUiThread { busyText?.text = "page ${minOf(done + 1, total)} of $total" }
+                    }
                     val exported = Storage.exportToDownloads(this@ScanActivity, out)
                     Pair(out, exported)
                 } catch (e: Throwable) {
                     null
                 }
             }
-            progress.visibility = View.GONE
+            saving = false
+            saveBtn.isEnabled = true
+            hideBusy()
             if (result == null) {
                 Toast.makeText(this@ScanActivity, "Could not create the PDF", Toast.LENGTH_LONG).show()
                 return@launch
             }
             val (file, exported) = result
-            ScanSession.reset()
+            ScanSession.reset(this@ScanActivity)
             adapter.notifyDataSetChanged()
             refreshEmpty()
             MaterialAlertDialogBuilder(this@ScanActivity)
@@ -571,14 +648,24 @@ class ScanActivity : BaseActivity() {
 
         override fun getItemCount() = ScanSession.pages.size
 
+        private val thumbs = object : android.util.LruCache<String, android.graphics.Bitmap>(24 * 1024 * 1024) {
+            override fun sizeOf(key: String, value: android.graphics.Bitmap) = value.byteCount
+        }
+
         override fun onBindViewHolder(holder: VH, position: Int) {
             val page = ScanSession.pages[position]
             holder.label.text = "Page ${position + 1}"
-            holder.thumb.setImageDrawable(null)
-            holder.thumb.tag = page.page.absolutePath
-            lifecycleScope.launch {
-                val bmp = withContext(Dispatchers.IO) { ImageUtils.thumb(page.page) }
-                if (holder.thumb.tag == page.page.absolutePath) holder.thumb.setImageBitmap(bmp)
+            val key = page.page.absolutePath
+            holder.thumb.tag = key
+            val cached = thumbs.get(key)
+            if (cached != null) holder.thumb.setImageBitmap(cached)
+            else {
+                holder.thumb.setImageDrawable(null)
+                lifecycleScope.launch {
+                    val bmp = withContext(Dispatchers.IO) { ImageUtils.thumb(page.page) }
+                    if (bmp != null) thumbs.put(key, bmp)
+                    if (holder.thumb.tag == key) holder.thumb.setImageBitmap(bmp)
+                }
             }
             holder.itemView.setOnClickListener { pageMenu(it, holder.bindingAdapterPosition) }
         }

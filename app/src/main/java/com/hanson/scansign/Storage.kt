@@ -41,6 +41,7 @@ object Storage {
         val keep = HashSet<String>()
         synchronized(inUse) { keep.addAll(inUse) }
         try { Recents.list(ctx).forEach { keep.add(it.file.absolutePath) } } catch (_: Throwable) {}
+        try { keep.addAll(ScanSession.files(ctx)) } catch (_: Throwable) {}
         var freed = 0L
         fun sweep(dir: File, filter: (File) -> Boolean = { true }) {
             dir.listFiles()?.forEach { f ->

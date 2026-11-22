@@ -82,7 +82,7 @@ object PdfTools {
         ctx: Context, images: List<File>, out: File, size: PageSize, quality: Quality, margin: Boolean,
         layout: Layout = Layout.NORMAL, searchable: Boolean = false, progress: Progress? = null
     ) {
-        PDDocument().use { doc ->
+        PDDocument(PdfOpener.memory()).use { doc ->
             if (layout == Layout.ID_CARD) {
                 // two cards stacked on an A4 page
                 var i = 0
