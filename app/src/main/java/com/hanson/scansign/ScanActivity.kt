@@ -204,14 +204,19 @@ class ScanActivity : BaseActivity() {
         val result = GmsDocumentScanningResult.fromActivityResultIntent(res.data) ?: return@registerForActivityResult
         val uris = result.pages?.map { it.imageUri } ?: emptyList()
         if (uris.isEmpty()) return@registerForActivityResult
-        progress.visibility = View.VISIBLE
+        val n = uris.size
+        showBusy("Getting your pages…", if (n == 1) "1 page" else "$n pages")
         lifecycleScope.launch {
             val origs = withContext(Dispatchers.IO) { uris.mapNotNull { u -> Storage.copyUriToWork(this@ScanActivity, u, "jpg") } }
-            if (origs.isEmpty()) { progress.visibility = View.GONE; return@launch }
+            if (origs.isEmpty()) { hideBusy(); return@launch }
             // first pages of a new document: let the user pick the look, then use it for every page
             val filter = ScanSession.filter ?: chooseFilter(origs[0]).also { ScanSession.filter = it }
+            showBusy("Processing…", "Applying ${filter.label}" + if (origs.size > 1) " · page 1 of ${origs.size}" else "")
+            var done = 0
             val pages = withContext(Dispatchers.IO) {
                 origs.mapNotNull { orig ->
+                    done++
+                    if (origs.size > 1) runOnUiThread { busyText?.text = "Applying ${filter.label} · page $done of ${origs.size}" }
                     if (filter == ScanFilter.ORIGINAL) return@mapNotNull ScanPage(orig, orig)
                     val bmp = ImageUtils.load(orig) ?: return@mapNotNull ScanPage(orig, orig)
                     val out = Storage.newWorkFile(this@ScanActivity, "jpg")
@@ -221,11 +226,10 @@ class ScanActivity : BaseActivity() {
                     ScanPage(orig, out)
                 }
             }
-            progress.visibility = View.GONE
             ScanSession.pages.addAll(pages)
             adapter.notifyDataSetChanged()
             list.scrollToPosition(ScanSession.pages.size - 1)
-            refreshEmpty()
+            hideBusy()
         }
     }
 
@@ -235,12 +239,13 @@ class ScanActivity : BaseActivity() {
      */
     private suspend fun chooseFilter(sample: File): ScanFilter {
         val def = Settings.defaultFilter(this)
+        showBusy("Preparing looks…", "Showing your page in every style")
         val previews = withContext(Dispatchers.Default) {
             val small = ImageUtils.load(sample, 520) ?: return@withContext null
             val out = ScanFilter.values().associateWith { f -> try { Scanner.applyFilter(small, f) } catch (_: Throwable) { small } }
             out
         } ?: return def
-        progress.visibility = View.GONE
+        busyCard?.visibility = View.GONE
         return kotlinx.coroutines.suspendCancellableCoroutine { cont ->
             val d = resources.displayMetrics.density
             val cols = if (Ui.isTablet(this)) 5 else 3
@@ -315,12 +320,12 @@ class ScanActivity : BaseActivity() {
 
     private fun importUris(uris: List<Uri>) {
         if (uris.isEmpty()) return
-        progress.visibility = View.VISIBLE
+        showBusy("Importing photos…", if (uris.size == 1) "1 photo" else "${uris.size} photos")
         lifecycleScope.launch {
             val files = withContext(Dispatchers.IO) {
                 uris.mapNotNull { Storage.copyUriToWork(this@ScanActivity, it, "jpg") }
             }
-            progress.visibility = View.GONE
+            hideBusy()
             queue.addAll(files)
             if (files.size > 1) {
                 Toast.makeText(this@ScanActivity, "${files.size} photos — adjust each one", Toast.LENGTH_SHORT).show()
@@ -342,8 +347,64 @@ class ScanActivity : BaseActivity() {
         cropLauncher.launch(CropActivity.intent(this, original, CropActivity.MODE_DOC))
     }
 
+    // ---- "Processing" card: shown while pages are being prepared, so the screen never looks empty
+    private var busyCard: View? = null
+    private var busyTitle: TextView? = null
+    private var busyText: TextView? = null
+    private val busy get() = busyCard?.visibility == View.VISIBLE
+
+    private fun showBusy(title: String, text: String = "") {
+        if (busyCard == null) {
+            val d = resources.displayMetrics.density
+            fun dp(v: Float) = (v * d).toInt()
+            val card = com.google.android.material.card.MaterialCardView(this).apply {
+                radius = 26 * d; cardElevation = 6 * d
+                setCardBackgroundColor(Ui.surfaceVariant(this@ScanActivity))
+            }
+            val box = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL; gravity = android.view.Gravity.CENTER_HORIZONTAL
+                setPadding(dp(32f), dp(28f), dp(32f), dp(26f))
+            }
+            box.addView(com.google.android.material.progressindicator.CircularProgressIndicator(this).apply {
+                isIndeterminate = true
+                indicatorSize = dp(56f); trackThickness = dp(5f)
+                setIndicatorColor(ContextCompat.getColor(this@ScanActivity, Themes.accent(this@ScanActivity).primary))
+                trackCornerRadius = dp(3f)
+            })
+            busyTitle = TextView(this).apply {
+                textSize = 18f; setTypeface(typeface, android.graphics.Typeface.BOLD); gravity = android.view.Gravity.CENTER
+                setTextColor(ContextCompat.getColor(this@ScanActivity, R.color.md_on_surface))
+                setPadding(0, dp(18f), 0, dp(4f))
+            }
+            busyText = TextView(this).apply {
+                textSize = 13.5f; gravity = android.view.Gravity.CENTER
+                setTextColor(ContextCompat.getColor(this@ScanActivity, R.color.md_on_surface_variant))
+            }
+            box.addView(busyTitle)
+            box.addView(busyText)
+            card.addView(box)
+            (progress.parent as android.view.ViewGroup).addView(card,
+                android.widget.FrameLayout.LayoutParams(dp(290f), -2, android.view.Gravity.CENTER))
+            busyCard = card
+        }
+        busyTitle?.text = title
+        busyText?.text = text
+        busyText?.visibility = if (text.isEmpty()) View.GONE else View.VISIBLE
+        progress.visibility = View.GONE
+        empty.visibility = View.GONE
+        busyCard?.let { c ->
+            if (c.visibility != View.VISIBLE) { c.alpha = 0f; c.visibility = View.VISIBLE; c.animate().alpha(1f).setDuration(180).start() }
+        }
+    }
+
+    private fun hideBusy() {
+        busyCard?.visibility = View.GONE
+        progress.visibility = View.GONE
+        refreshEmpty()
+    }
+
     private fun refreshEmpty() {
-        empty.visibility = if (ScanSession.pages.isEmpty()) View.VISIBLE else View.GONE
+        empty.visibility = if (ScanSession.pages.isEmpty() && !busy) View.VISIBLE else View.GONE
         title = if (ScanSession.pages.isEmpty()) "New scan" else "New scan · ${ScanSession.pages.size} page(s)"
     }
 
