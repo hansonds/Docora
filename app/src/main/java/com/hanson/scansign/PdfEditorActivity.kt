@@ -54,6 +54,8 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         )
 
         const val EXTRA_URI = "uri"
+        /** Opened from another app (WhatsApp, Files, Gmail…): closing returns to that app. */
+        const val EXTRA_FROM_APP = "from_app"
 
         /** [sourceUri] = where the PDF came from, so "Replace original" can write back to it. */
         fun intent(ctx: Context, pdf: File, displayName: String? = null, sourceUri: android.net.Uri? = null) =
@@ -135,7 +137,8 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         val out = res.data?.getStringExtra(OrganizeActivity.EXTRA_OUT) ?: return@registerForActivityResult
         // reopen the reorganised file in the editor
         dirty = false
-        startActivity(intent(this, File(out)))
+        reopening = true
+        startActivity(intent(this, File(out)).putExtra(EXTRA_FROM_APP, fromOtherApp))
         finish()
     }
 
@@ -215,7 +218,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                 typing != null -> finishTyping(true)
                 searching -> closeFind()
                 betaMode -> exitBeta()
-                fullscreen -> setFullscreen(false)
+                fullscreen && !fromOtherApp -> setFullscreen(false)
                 else -> confirmLeave()
             }
         })
@@ -2541,6 +2544,22 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             .setNegativeButton("Cancel", null)
             .show()
         input.requestFocus()
+    }
+
+    private val fromOtherApp by lazy { intent.getBooleanExtra(EXTRA_FROM_APP, false) }
+    /** True when this screen closes only to reopen the document (stays in Docora). */
+    private var reopening = false
+
+    /**
+     * Closing a PDF that another app opened (back, Discard, Save & close) returns to that app:
+     * Docora's screen steps back so WhatsApp / Files / Gmail comes to the front again.
+     * The Home button and Recents work as usual.
+     */
+    override fun finish() {
+        if (fromOtherApp && !reopening && !isChangingConfigurations) {
+            try { moveTaskToBack(true) } catch (_: Throwable) {}
+        }
+        super.finish()
     }
 
     private fun confirmLeave() {

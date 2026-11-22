@@ -31,6 +31,7 @@ class OpenPdfActivity : Activity() {
             val open = Intent(this, PdfEditorActivity::class.java)
                 .setDataAndType(uri, "application/pdf")
                 .putExtra(PdfEditorActivity.EXTRA_URI, uri)
+                .putExtra(PdfEditorActivity.EXTRA_FROM_APP, true)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or grants or Intent.FLAG_GRANT_READ_URI_PERMISSION)
             try {
                 startActivity(open)
