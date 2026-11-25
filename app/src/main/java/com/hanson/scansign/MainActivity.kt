@@ -67,11 +67,13 @@ class MainActivity : BaseActivity() {
         toolbar.menu.add(0, 2, 0, "Search").apply { setIcon(R.drawable.ic_search); setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS) }
         toolbar.menu.add(0, 3, 1, "Settings").apply { setIcon(R.drawable.ic_settings); setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS) }
         toolbar.menu.add(0, 1, 2, "About").apply { setIcon(R.drawable.ic_info); setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS) }
+        toolbar.menu.add(0, 4, 3, "Share Docora").apply { setIcon(R.drawable.ic_share); setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS) }
         toolbar.setOnMenuItemClickListener {
             when (it.itemId) {
                 1 -> startActivity(Intent(this, AboutActivity::class.java))
                 2 -> toggleSearch()
                 3 -> startActivity(Intent(this, SettingsActivity::class.java))
+                4 -> ShareApp.share(this)
             }
             true
         }

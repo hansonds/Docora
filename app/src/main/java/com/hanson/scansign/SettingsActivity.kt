@@ -109,6 +109,7 @@ class SettingsActivity : BaseActivity() {
             }
         }
         findViewById<android.view.View>(R.id.btnRateSettings).setOnClickListener { RateApp.openStore(this) }
+        findViewById<android.view.View>(R.id.btnShareAppSettings).setOnClickListener { ShareApp.share(this) }
         findViewById<android.view.View>(R.id.btnLanguages).setOnClickListener {
             startActivity(android.content.Intent(this, TranslateLanguagesActivity::class.java))
         }

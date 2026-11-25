@@ -137,6 +137,7 @@ class AboutActivity : BaseActivity() {
         findViewById<View>(R.id.btnWeb).setOnClickListener { open("https://phoenicx.org") }
         findViewById<View>(R.id.btnPrivacy).setOnClickListener { open("https://hansonds.github.io/Docora/privacy/") }
         findViewById<View>(R.id.btnRate).setOnClickListener { RateApp.openStore(this) }
+        findViewById<View>(R.id.btnShareApp).setOnClickListener { ShareApp.share(this) }
 
         // engines + credits
         findViewById<TextView>(R.id.secStatus).setCompoundDrawablesRelativeWithIntrinsicBounds(

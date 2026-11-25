@@ -364,7 +364,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
-                        android:text="Docora is free with no ads. A quick rating on Google Play helps other people find it."
+                        android:text="Docora is free with no ads. A quick rating, or sharing it with friends, helps other people find it."
                         android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
                         android:textColor="?attr/colorOnSurfaceVariant" />
 
@@ -376,6 +376,15 @@
                         android:layout_marginTop="10dp"
                         android:text="Rate on Google Play  ★"
                         app:icon="@drawable/ic_star" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnShareAppSettings"
+                        style="@style/Widget.App.OutlineButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="50dp"
+                        android:layout_marginTop="8dp"
+                        android:text="Share Docora with friends"
+                        app:icon="@drawable/ic_share" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
         </LinearLayout>

@@ -204,6 +204,15 @@
                         android:layout_marginTop="10dp"
                         android:text="Rate Docora on Google Play  ★"
                         app:icon="@drawable/ic_star" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnShareApp"
+                        style="@style/Widget.App.OutlineButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="52dp"
+                        android:layout_marginTop="8dp"
+                        android:text="Share Docora with friends"
+                        app:icon="@drawable/ic_share" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
