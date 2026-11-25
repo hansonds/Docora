@@ -67,13 +67,11 @@ class MainActivity : BaseActivity() {
         toolbar.menu.add(0, 2, 0, "Search").apply { setIcon(R.drawable.ic_search); setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS) }
         toolbar.menu.add(0, 3, 1, "Settings").apply { setIcon(R.drawable.ic_settings); setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS) }
         toolbar.menu.add(0, 1, 2, "About").apply { setIcon(R.drawable.ic_info); setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS) }
-        toolbar.menu.add(0, 4, 3, "Share Docora").apply { setIcon(R.drawable.ic_share); setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS) }
         toolbar.setOnMenuItemClickListener {
             when (it.itemId) {
                 1 -> startActivity(Intent(this, AboutActivity::class.java))
                 2 -> toggleSearch()
                 3 -> startActivity(Intent(this, SettingsActivity::class.java))
-                4 -> ShareApp.share(this)
             }
             true
         }
@@ -92,6 +90,25 @@ class MainActivity : BaseActivity() {
         list.layoutManager = LinearLayoutManager(this)
         list.adapter = adapter
 
+        findViewById<MaterialButton>(R.id.btnShareHome).apply {
+            setOnClickListener { ShareApp.share(this@MainActivity) }
+            // small phones: just the heart, so "Scan document" keeps its full width
+            if (resources.configuration.screenWidthDp < 380) {
+                text = ""; iconPadding = 0
+                val p = (14 * resources.displayMetrics.density).toInt()
+                setPadding(p, paddingTop, p, paddingBottom)
+            }
+            // a little heartbeat when the home screen opens
+            postDelayed({
+                animate().scaleX(1.08f).scaleY(1.08f).setDuration(160).withEndAction {
+                    animate().scaleX(1f).scaleY(1f).setDuration(160).withEndAction {
+                        animate().scaleX(1.06f).scaleY(1.06f).setDuration(140).withEndAction {
+                            animate().scaleX(1f).scaleY(1f).setDuration(200).start()
+                        }.start()
+                    }.start()
+                }.start()
+            }, 900)
+        }
         findViewById<MaterialButton>(R.id.btnScan).setOnClickListener {
             startActivity(ScanActivity.intent(this, ScanActivity.START_CAMERA))
         }

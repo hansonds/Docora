@@ -53,12 +53,18 @@
                     android:textColor="#FFFFFF"
                     android:textSize="13sp" />
 
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnScan"
                     style="@style/Widget.App.PrimaryButton"
                     android:layout_height="52dp"
                     android:layout_width="wrap_content"
-                    android:layout_marginTop="16dp"
                     android:backgroundTint="#FFFFFF"
                     android:paddingHorizontal="22dp"
                     android:text="Scan document"
@@ -66,6 +72,35 @@
                     android:textStyle="bold"
                     app:icon="@drawable/ic_camera"
                     app:iconTint="@color/brand" />
+
+                <Space
+                    android:layout_width="0dp"
+                    android:layout_height="1dp"
+                    android:layout_weight="1" />
+
+                <!-- cute "Share" pill: frosted glass with a pink heart -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnShareHome"
+                    style="@style/Widget.Material3.Button"
+                    android:layout_width="wrap_content"
+                    android:layout_height="52dp"
+                    android:layout_marginStart="10dp"
+                    android:backgroundTint="#33FFFFFF"
+                    android:contentDescription="Share Docora with friends"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:paddingHorizontal="16dp"
+                    android:text="Share"
+                    android:textColor="#FFFFFF"
+                    android:textStyle="bold"
+                    app:cornerRadius="26dp"
+                    app:icon="@drawable/ic_heart"
+                    app:iconPadding="6dp"
+                    app:iconSize="20dp"
+                    app:iconTint="@null"
+                    app:strokeColor="#80FFFFFF"
+                    app:strokeWidth="1.5dp" />
+                </LinearLayout>
             </LinearLayout>
 
             <LinearLayout

@@ -88,9 +88,10 @@ object ShareApp {
         cv.drawText("PDF Editor & Scanner", w / 2f, 390f, t)
 
         // white card with the features
-        val card = RectF(64f, 450f, w - 64f, 1000f)
-        p.color = Color.argb(50, 0, 0, 0)
-        cv.drawRoundRect(RectF(card.left, card.top + 10, card.right, card.bottom + 14), 44f, 44f, p)
+        val rowH = 80f; val pad = 34f
+        val card = RectF(64f, 432f, w - 64f, 432f + pad * 2 + rowH * 6)
+        p.color = Color.argb(34, 0, 0, 0)
+        cv.drawRoundRect(RectF(card.left + 6, card.top + 8, card.right - 6, card.bottom + 8), 44f, 44f, p)
         p.color = Color.WHITE
         cv.drawRoundRect(card, 44f, 44f, p)
         val features = listOf(
@@ -103,15 +104,16 @@ object ShareApp {
         )
         val f = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(28, 32, 48); textSize = 38f }
         val tick = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; style = Paint.Style.STROKE; strokeWidth = 7f; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
-        var y = card.top + 92f
-        for ((label, col) in features) {
-            val cx = card.left + 76f; val cy = y - 13f
+        val fm = f.fontMetrics
+        for ((i, pair) in features.withIndex()) {
+            val (label, col) = pair
+            val cx = card.left + 76f; val cy = card.top + pad + rowH * i + rowH / 2
+            val y = cy - (fm.ascent + fm.descent) / 2   // text centred on the tick
             p.color = col
             cv.drawCircle(cx, cy, 28f, p)
             val path = android.graphics.Path().apply { moveTo(cx - 12f, cy + 1f); lineTo(cx - 3f, cy + 10f); lineTo(cx + 13f, cy - 9f) }
             cv.drawPath(path, tick)
             cv.drawText(label, cx + 56f, y, f)
-            y += 84f
         }
 
         // "100% free" ribbon
@@ -119,19 +121,20 @@ object ShareApp {
         val free = "100% FREE  ·  NO ADS  ·  NO WATERMARK"
         val fw = t.measureText(free) + 80f
         p.color = Color.argb(60, 255, 255, 255)
-        cv.drawRoundRect(RectF((w - fw) / 2, 1032f, (w + fw) / 2, 1100f), 34f, 34f, p)
-        cv.drawText(free, w / 2f, 1079f, t)
+        val rTop = card.bottom + 36f
+        cv.drawRoundRect(RectF((w - fw) / 2, rTop, (w + fw) / 2, rTop + 68f), 34f, 34f, p)
+        cv.drawText(free, w / 2f, rTop + 34f - (t.fontMetrics.ascent + t.fontMetrics.descent) / 2, t)
 
         // QR code + "Get it on Google Play"
         val qr = BitmapFactory.decodeResource(c.resources, R.drawable.share_qr, BitmapFactory.Options().apply { inScaled = false })
-        val qx = 96f; val qy = 1128f; val qs = 190f
+        val qs = 180f; val qx = 96f; val qy = h - 44f - qs
         p.color = Color.WHITE
         cv.drawRoundRect(RectF(qx - 12, qy - 12, qx + qs + 12, qy + qs + 12), 22f, 22f, p)
         if (qr != null) cv.drawBitmap(qr, null, RectF(qx, qy, qx + qs, qy + qs), Paint())   // no smoothing: keeps the code sharp
         val l = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = 54f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) }
-        cv.drawText("Get it on Google Play", qx + qs + 56f, qy + 82f, l)
+        cv.drawText("Get it on Google Play", qx + qs + 56f, qy + 78f, l)
         l.textSize = 34f; l.typeface = Typeface.DEFAULT; l.color = Color.argb(220, 255, 255, 255)
-        cv.drawText("Scan the code or tap the link", qx + qs + 56f, qy + 138f, l)
+        cv.drawText("Scan the code or tap the link", qx + qs + 56f, qy + 132f, l)
 
         val dir = File(c.cacheDir, "share").apply { mkdirs() }
         val out = File(dir, "Docora.jpg")
