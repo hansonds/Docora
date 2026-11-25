@@ -90,15 +90,11 @@ class MainActivity : BaseActivity() {
         list.layoutManager = LinearLayoutManager(this)
         list.adapter = adapter
 
-        findViewById<MaterialButton>(R.id.btnShareHome).apply {
+        findViewById<TextView>(R.id.shareLabel).setTextColor(
+            ContextCompat.getColor(this, Themes.accent(this).hero1))
+        findViewById<View>(R.id.btnShareHome).apply {
             setOnClickListener { ShareApp.share(this@MainActivity) }
-            // small phones: just the heart, so "Scan document" keeps its full width
-            if (resources.configuration.screenWidthDp < 380) {
-                text = ""; iconPadding = 0
-                val p = (14 * resources.displayMetrics.density).toInt()
-                setPadding(p, paddingTop, p, paddingBottom)
-            }
-            // a little heartbeat when the home screen opens
+            // a little bounce when the home screen opens
             postDelayed({
                 animate().scaleX(1.08f).scaleY(1.08f).setDuration(160).withEndAction {
                     animate().scaleX(1f).scaleY(1f).setDuration(160).withEndAction {

@@ -78,28 +78,50 @@
                     android:layout_height="1dp"
                     android:layout_weight="1" />
 
-                <!-- cute "Share" pill: frosted glass with a pink heart -->
-                <com.google.android.material.button.MaterialButton
+                <!-- small "Share" badge: round icon sitting on a little pill -->
+                <FrameLayout
                     android:id="@+id/btnShareHome"
-                    style="@style/Widget.Material3.Button"
-                    android:layout_width="wrap_content"
-                    android:layout_height="52dp"
+                    android:layout_width="70dp"
+                    android:layout_height="54dp"
                     android:layout_marginStart="10dp"
-                    android:backgroundTint="#33FFFFFF"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:clickable="true"
                     android:contentDescription="Share Docora with friends"
-                    android:insetTop="0dp"
-                    android:insetBottom="0dp"
-                    android:paddingHorizontal="16dp"
-                    android:text="Share"
-                    android:textColor="#FFFFFF"
-                    android:textStyle="bold"
-                    app:cornerRadius="26dp"
-                    app:icon="@drawable/ic_heart"
-                    app:iconPadding="6dp"
-                    app:iconSize="20dp"
-                    app:iconTint="@null"
-                    app:strokeColor="#80FFFFFF"
-                    app:strokeWidth="1.5dp" />
+                    android:focusable="true">
+
+                    <TextView
+                        android:id="@+id/shareLabel"
+                        android:layout_width="match_parent"
+                        android:layout_height="24dp"
+                        android:layout_gravity="bottom"
+                        android:background="@drawable/bg_share_pill"
+                        android:elevation="3dp"
+                        android:gravity="center"
+                        android:letterSpacing="0.08"
+                        android:paddingTop="5dp"
+                        android:text="SHARE"
+                        android:textColor="@color/brand"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
+
+                    <FrameLayout
+                        android:layout_width="38dp"
+                        android:layout_height="38dp"
+                        android:layout_gravity="top|center_horizontal"
+                        android:background="@drawable/bg_share_ring"
+                        android:elevation="4dp"
+                        android:padding="4dp">
+
+                        <ImageView
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:background="@drawable/bg_share_dot"
+                            android:contentDescription="@null"
+                            android:padding="6dp"
+                            android:src="@drawable/ic_share"
+                            app:tint="#FFFFFF" />
+                    </FrameLayout>
+                </FrameLayout>
                 </LinearLayout>
             </LinearLayout>
 
