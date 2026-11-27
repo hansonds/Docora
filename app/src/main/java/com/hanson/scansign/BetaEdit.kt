@@ -203,25 +203,28 @@ object BetaEdit {
                     it.cosObject.getNameAsString(COSName.SUBTYPE) == "OpenType"
                 } ?: continue
                 val bytes = stream.createInputStream().use { it.readBytes() }
-                if (!drawsLetters(bytes, openType, chars)) continue
-                TextRender.registerPdfFace(name, bytes, isBold(f), isItalic(f))
+                val covered = coverage(bytes, openType) ?: continue
+                val letters = chars.filter { !it.isWhitespace() }
+                if (letters.isEmpty() || letters.count { it in covered } < letters.size * 0.95f) continue
+                TextRender.registerPdfFace(name, bytes, isBold(f), isItalic(f), covered)
             } catch (_: Throwable) {}
         }
     }
 
-    /** True if the font file maps (almost) all [chars] to real letter shapes by their normal codes. */
-    private fun drawsLetters(bytes: ByteArray, openType: Boolean, chars: Set<Char>): Boolean {
-        val letters = chars.filter { !it.isWhitespace() }
-        if (letters.isEmpty()) return false
+    /** Letters (Latin, punctuation, symbols) the font file really contains by their normal codes; null if unreadable. */
+    private fun coverage(bytes: ByteArray, openType: Boolean): Set<Char>? {
         val ttf = try {
             if (openType) com.tom_roush.fontbox.ttf.OTFParser(true).parse(java.io.ByteArrayInputStream(bytes))
             else com.tom_roush.fontbox.ttf.TTFParser(true).parse(java.io.ByteArrayInputStream(bytes))
-        } catch (_: Throwable) { return false }
+        } catch (_: Throwable) { return null }
         return try {
-            val cmap = ttf.getUnicodeCmapLookup(false) ?: return false
-            val found = letters.count { cmap.getGlyphId(it.code) > 0 }
-            found >= letters.size * 0.95f
-        } catch (_: Throwable) { false } finally {
+            val cmap = ttf.getUnicodeCmapLookup(false) ?: return null
+            val out = HashSet<Char>()
+            for (range in listOf(0x20..0x24F, 0x370..0x3FF, 0x400..0x4FF, 0x2000..0x206F, 0x20A0..0x20CF, 0x2100..0x215F)) {
+                for (c in range) if (cmap.getGlyphId(c) > 0) out.add(c.toChar())
+            }
+            out
+        } catch (_: Throwable) { null } finally {
             try { ttf.close() } catch (_: Throwable) {}
         }
     }

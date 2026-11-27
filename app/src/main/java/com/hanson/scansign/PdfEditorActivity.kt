@@ -769,6 +769,19 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     private var typingInk = Color.BLACK
     private val typeBox: EditText by lazy {
         findViewById<EditText>(R.id.typeBox).also { box ->
+            // a letter the PDF's own (cut-down) font doesn't have would show in the phone's font and look
+            // different from the rest: switch the whole text to Docora's matching font instead (as saving does)
+            box.addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+                override fun afterTextChanged(s: android.text.Editable?) {
+                    val item = typing ?: return
+                    if (item.origFont == null || TextRender.pdfFontDraws(item, s?.toString() ?: "")) return
+                    item.origFont = null
+                    box.post { if (typing === item) { styleTypeBox(); box.requestLayout(); box.invalidate() } }
+                    hintOnce("beta_font_fallback", "This PDF's font doesn't include all the letters you typed, so a matching font is used")
+                }
+            })
             // Bold / Italic / Underline also appear in the menu shown when words are selected
             box.customSelectionActionModeCallback = object : android.view.ActionMode.Callback {
                 override fun onCreateActionMode(mode: android.view.ActionMode, menu: android.view.Menu): Boolean {

@@ -27,16 +27,30 @@ object TextRender {
     fun init(ctx: android.content.Context) { assets = ctx.applicationContext.assets; cacheDir = ctx.applicationContext.cacheDir }
 
     /** The PDF's own fonts (for replaced text), by PDF font name, with their style. */
-    private class PdfFace(val face: Typeface, val bold: Boolean, val italic: Boolean)
+    /** [chars] = the letters the embedded font really contains (PDFs usually carry only the ones they use). */
+    private class PdfFace(val face: Typeface, val bold: Boolean, val italic: Boolean, val chars: Set<Char>) {
+        fun draws(text: String) = text.all { it.isWhitespace() || it in chars }
+    }
     private val pdfFaces = HashMap<String, PdfFace>()
 
-    fun registerPdfFace(name: String, bytes: ByteArray, bold: Boolean, italic: Boolean) {
+    /** True if the PDF's own font chosen for [item] can draw every letter of [text] (else Docora's font is used). */
+    fun pdfFontDraws(item: TextItem, text: String): Boolean {
+        val orig = (item as? ReplacedText)?.origFont ?: return true
+        synchronized(pdfFaces) {
+            val fam = BetaEdit.familyKey(orig)
+            val same = pdfFaces.entries.filter { BetaEdit.familyKey(it.key) == fam }.map { it.value }
+            if (same.isEmpty()) return true
+            return same.any { it.draws(text) }
+        }
+    }
+
+    fun registerPdfFace(name: String, bytes: ByteArray, bold: Boolean, italic: Boolean, chars: Set<Char>) {
         val dir = java.io.File(cacheDir ?: return, "pdffonts").apply { mkdirs() }
         val file = java.io.File(dir, "f_" + Integer.toHexString(name.hashCode()) + ".ttf")
         try {
             if (!file.exists()) file.writeBytes(bytes)
             val face = Typeface.createFromFile(file)
-            synchronized(pdfFaces) { pdfFaces[name] = PdfFace(face, bold, italic) }
+            synchronized(pdfFaces) { pdfFaces[name] = PdfFace(face, bold, italic, chars) }
         } catch (_: Throwable) {}
     }
 
@@ -55,9 +69,11 @@ object TextRender {
         if (orig != null) {
             synchronized(pdfFaces) {
                 val fam = BetaEdit.familyKey(orig)
-                val same = pdfFaces.entries.filter { BetaEdit.familyKey(it.key) == fam }
+                // only fonts that contain every letter of the text: a missing letter would be drawn
+                // in the phone's own font and look different (e.g. bolder) from the rest
+                val same = pdfFaces.entries.filter { BetaEdit.familyKey(it.key) == fam && it.value.draws(item.text) }
                 same.firstOrNull { it.value.bold == bold && it.value.italic == italic }?.let { return Face(it.value.face, false, false, true) }
-                val o = pdfFaces[orig]
+                val o = pdfFaces[orig]?.takeIf { it.draws(item.text) }
                 if (o != null && (!o.bold || bold) && (!o.italic || italic))
                     return Face(o.face, bold && !o.bold, italic && !o.italic, true)
                 same.firstOrNull { !it.value.bold && !it.value.italic }?.let { return Face(it.value.face, bold, italic, true) }
