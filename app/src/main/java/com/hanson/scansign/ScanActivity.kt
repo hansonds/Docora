@@ -185,7 +185,7 @@ class ScanActivity : BaseActivity() {
         })
 
         val missing = ScanSession.restore(this)
-        if (missing > 0) Toast.makeText(this, "$missing kept page(s) were removed by the phone's storage cleanup", Toast.LENGTH_LONG).show()
+        if (missing > 0) Ui.note(this, "$missing kept page(s) were removed by the phone's storage cleanup", long = true)
         if (savedInstanceState != null) {
             editIndex = savedInstanceState.getInt(STATE_EDIT_INDEX, -1)
         } else {
@@ -209,7 +209,7 @@ class ScanActivity : BaseActivity() {
 
     override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean {
         if (item.itemId == 7) {
-            if (ScanSession.pages.isEmpty()) Toast.makeText(this, "Scan some pages first", Toast.LENGTH_SHORT).show()
+            if (ScanSession.pages.isEmpty()) Ui.note(this, "Scan some pages first")
             else startActivity(TextResultActivity.forImages(this, ScanSession.pages.map { it.page }, "Scan"))
             return true
         }
@@ -255,7 +255,7 @@ class ScanActivity : BaseActivity() {
             // first pages of a new document: let the user pick the look, then use it for every page.
             // The AI scanner has already cleaned the pages, so "As scanned" is the default.
             val filter = ScanSession.filter ?: (if (App.openCvReady) chooseFilter(origs[0], ScanFilter.ORIGINAL) else {
-                Toast.makeText(this@ScanActivity, "Page looks aren't available on this phone — pages are kept as scanned", Toast.LENGTH_LONG).show()
+                Ui.note(this@ScanActivity, "Page looks aren't available on this phone — pages are kept as scanned", long = true)
                 ScanFilter.ORIGINAL
             }).also { ScanSession.filter = it }
             val lookName = if (filter == ScanFilter.ORIGINAL) "As scanned" else filter.label
@@ -358,7 +358,7 @@ class ScanActivity : BaseActivity() {
             .addOnSuccessListener { sender -> aiLauncher.launch(IntentSenderRequest.Builder(sender).build()) }
             .addOnFailureListener {
                 // no Google Play services / unsupported device: use the built-in camera
-                Toast.makeText(this, "AI scanner not available on this phone — using the built-in camera", Toast.LENGTH_LONG).show()
+                Ui.note(this, "AI scanner not available on this phone — using the built-in camera", long = true)
                 cameraLauncher.launch(CameraActivity.intent(this, CameraActivity.MODE_DOC, ScanSession.pages.size))
             }
     }
@@ -377,7 +377,7 @@ class ScanActivity : BaseActivity() {
             hideBusy()
             queue.addAll(files)
             if (files.size > 1) {
-                Toast.makeText(this@ScanActivity, "${files.size} photos — adjust each one", Toast.LENGTH_SHORT).show()
+                Ui.note(this@ScanActivity, "${files.size} photos — adjust each one")
             }
             editIndex = -1
             nextInQueue()
@@ -539,7 +539,7 @@ class ScanActivity : BaseActivity() {
 
     private fun askSave() {
         if (ScanSession.pages.isEmpty()) {
-            Toast.makeText(this, "Add at least one page first", Toast.LENGTH_SHORT).show()
+            Ui.note(this, "Add at least one page first")
             return
         }
         val view = LayoutInflater.from(this).inflate(R.layout.dialog_save_pdf, null)
@@ -618,7 +618,7 @@ class ScanActivity : BaseActivity() {
             saveBtn.isEnabled = true
             hideBusy()
             if (result == null) {
-                Toast.makeText(this@ScanActivity, "Could not create the PDF", Toast.LENGTH_LONG).show()
+                Ui.note(this@ScanActivity, "Could not create the PDF", long = true)
                 return@launch
             }
             val (file, exported) = result

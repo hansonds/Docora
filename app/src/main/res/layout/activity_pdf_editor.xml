@@ -205,38 +205,38 @@
                 app:tint="#FFFFFF" />
         </LinearLayout>
 
-        <!-- shown briefly in full screen: two round buttons stacked at the bottom right -->
+        <!-- shown briefly in full screen: two small frosted-glass buttons at the bottom right -->
         <ImageButton
             android:id="@+id/btnFullTranslate"
-            android:layout_width="50dp"
-            android:layout_height="50dp"
+            android:layout_width="42dp"
+            android:layout_height="42dp"
             android:layout_gravity="bottom|end"
-            android:layout_marginEnd="20dp"
-            android:layout_marginBottom="94dp"
-            android:background="@drawable/bg_fab_translate"
+            android:layout_marginEnd="18dp"
+            android:layout_marginBottom="78dp"
+            android:background="@drawable/bg_fab_glass"
             android:contentDescription="Translate this page"
-            android:elevation="8dp"
-            android:padding="13dp"
+            android:elevation="6dp"
+            android:padding="11dp"
             android:scaleType="fitCenter"
             android:src="@drawable/ic_web"
             android:visibility="gone"
-            app:tint="#FFFFFF" />
+            app:tint="#1F2433" />
 
         <ImageButton
             android:id="@+id/btnExitFull"
-            android:layout_width="50dp"
-            android:layout_height="50dp"
+            android:layout_width="42dp"
+            android:layout_height="42dp"
             android:layout_gravity="bottom|end"
-            android:layout_marginEnd="20dp"
-            android:layout_marginBottom="30dp"
-            android:background="@drawable/bg_fab_exit"
+            android:layout_marginEnd="18dp"
+            android:layout_marginBottom="26dp"
+            android:background="@drawable/bg_fab_glass"
             android:contentDescription="Exit full screen"
-            android:elevation="8dp"
-            android:padding="13dp"
+            android:elevation="6dp"
+            android:padding="10dp"
             android:scaleType="fitCenter"
             android:src="@drawable/ic_fullscreen_exit"
             android:visibility="gone"
-            app:tint="#FFFFFF" />
+            app:tint="#1F2433" />
 
         <LinearLayout
             android:id="@+id/loading"

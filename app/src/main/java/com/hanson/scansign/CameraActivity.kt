@@ -88,7 +88,7 @@ class CameraActivity : BaseActivity() {
     private val requestPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) startCamera()
         else {
-            Toast.makeText(this, "Camera permission is needed to scan", Toast.LENGTH_LONG).show()
+            Ui.note(this, "Camera permission is needed to scan", long = true)
             finish()
         }
     }
@@ -132,7 +132,7 @@ class CameraActivity : BaseActivity() {
             autoCapture = !autoCapture
             getSharedPreferences("camera", MODE_PRIVATE).edit().putBoolean("auto", autoCapture).apply()
             updateAutoButton()
-            Toast.makeText(this, if (autoCapture) "Auto capture on" else "Auto capture off", Toast.LENGTH_SHORT).show()
+            Ui.note(this, if (autoCapture) "Auto capture on" else "Auto capture off")
         }
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
@@ -155,7 +155,7 @@ class CameraActivity : BaseActivity() {
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             val provider = try { future.get() } catch (e: Exception) {
-                Toast.makeText(this, "Camera not available", Toast.LENGTH_LONG).show()
+                Ui.note(this, "Camera not available", long = true)
                 finish()
                 return@addListener
             }
@@ -184,7 +184,7 @@ class CameraActivity : BaseActivity() {
                     provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, capture)
                 }
             } catch (e: Exception) {
-                Toast.makeText(this, "Could not start the camera", Toast.LENGTH_LONG).show()
+                Ui.note(this, "Could not start the camera", long = true)
                 finish()
             }
         }, ContextCompat.getMainExecutor(this))
@@ -193,7 +193,7 @@ class CameraActivity : BaseActivity() {
     private fun toggleTorch() {
         val cam = camera ?: return
         if (!cam.cameraInfo.hasFlashUnit()) {
-            Toast.makeText(this, "No flash on this camera", Toast.LENGTH_SHORT).show()
+            Ui.note(this, "No flash on this camera")
             return
         }
         torchOn = !torchOn
@@ -353,7 +353,7 @@ class CameraActivity : BaseActivity() {
                     capturing = false
                     btnShutter.isEnabled = true
                     stableCount = 0
-                    Toast.makeText(this@CameraActivity, "Capture failed, try again", Toast.LENGTH_SHORT).show()
+                    Ui.note(this@CameraActivity, "Capture failed, try again")
                 }
             }
         )

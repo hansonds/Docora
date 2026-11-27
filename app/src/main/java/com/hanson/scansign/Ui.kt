@@ -90,7 +90,57 @@ object Ui {
             .show()
     }
 
-    fun toast(a: AppCompatActivity, msg: String) = Toast.makeText(a, msg, Toast.LENGTH_LONG).show()
+    fun toast(a: AppCompatActivity, msg: String) = note(a, msg, long = true)
+
+    private var lastNote: Toast? = null
+
+    /**
+     * Docora's short message: a dark rounded pill with the app's little logo, near the bottom of the
+     * screen (instead of the plain grey system message). A new message replaces the one showing.
+     */
+    @Suppress("DEPRECATION")
+    fun note(ctx: android.content.Context, msg: CharSequence, long: Boolean = false) {
+        val c = ctx.applicationContext ?: ctx
+        val d = c.resources.displayMetrics.density
+        try {
+            val row = android.widget.LinearLayout(c).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding((14 * d).toInt(), (11 * d).toInt(), (18 * d).toInt(), (11 * d).toInt())
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = 22 * d
+                    setColor(android.graphics.Color.argb(242, 28, 32, 44))
+                    setStroke(d.toInt().coerceAtLeast(1), android.graphics.Color.argb(46, 255, 255, 255))
+                }
+            }
+            val icon = android.widget.ImageView(c).apply {
+                setImageResource(R.drawable.app_logo)
+                scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                outlineProvider = object : android.view.ViewOutlineProvider() {
+                    override fun getOutline(v: View, o: android.graphics.Outline) = o.setRoundRect(0, 0, v.width, v.height, 6 * d)
+                }
+                clipToOutline = true
+            }
+            row.addView(icon, android.widget.LinearLayout.LayoutParams((22 * d).toInt(), (22 * d).toInt()).apply { marginEnd = (11 * d).toInt() })
+            row.addView(TextView(c).apply {
+                text = msg
+                setTextColor(android.graphics.Color.WHITE)
+                textSize = 14f
+                maxLines = 4
+                maxWidth = (290 * d).toInt()
+                setLineSpacing(0f, 1.1f)
+            })
+            lastNote?.cancel()
+            val t = Toast(c)
+            t.view = row
+            t.duration = if (long) Toast.LENGTH_LONG else Toast.LENGTH_SHORT
+            t.setGravity(android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL, 0, (110 * d).toInt())
+            t.show()
+            lastNote = t
+        } catch (_: Throwable) {
+            Toast.makeText(c, msg, if (long) Toast.LENGTH_LONG else Toast.LENGTH_SHORT).show()
+        }
+    }
 
     /** Share a PDF, with clear options to make it smaller first (good for WhatsApp / email limits). */
     fun share(a: AppCompatActivity, file: File) = ShareSheet.show(a, file)

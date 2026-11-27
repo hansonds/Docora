@@ -307,7 +307,7 @@ class ToolsActivity : BaseActivity() {
                         Pair(out, Storage.exportToDownloads(this@ToolsActivity, out))
                     } catch (e: Throwable) { null }
                 }
-                if (saved == null) Toast.makeText(this@ToolsActivity, "Couldn't save the compressed PDF", Toast.LENGTH_LONG).show()
+                if (saved == null) Ui.note(this@ToolsActivity, "Couldn't save the compressed PDF", long = true)
                 else ShareSheet.compressedResult(this@ToolsActivity, before, saved.first, saved.second)
             }
         }

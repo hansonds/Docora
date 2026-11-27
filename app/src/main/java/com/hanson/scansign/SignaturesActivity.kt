@@ -58,10 +58,10 @@ class SignaturesActivity : BaseActivity() {
             if (ready != null) {
                 // already a clean signature (e.g. a PNG saved from Docora): keep it exactly as it is
                 reload()
-                Toast.makeText(this@SignaturesActivity, "Added as it is — it already has a transparent background", Toast.LENGTH_LONG).show()
+                Ui.note(this@SignaturesActivity, "Added as it is — it already has a transparent background", long = true)
                 if (pickMode) returnSignature(ready)
             } else if (f != null) crop(f)
-            else Toast.makeText(this@SignaturesActivity, "Could not open the photo", Toast.LENGTH_SHORT).show()
+            else Ui.note(this@SignaturesActivity, "Could not open the photo")
         }
     }
 
@@ -324,7 +324,7 @@ class SignaturesActivity : BaseActivity() {
             SigColors.pick(this@SignaturesActivity, "Signature colour", f, now) { ink ->
                 lifecycleScope.launch {
                     val ok = withContext(Dispatchers.IO) { SigColors.recolorSaved(this@SignaturesActivity, f, ink) }
-                    if (!ok) Toast.makeText(this@SignaturesActivity, "Couldn't change the colour", Toast.LENGTH_SHORT).show()
+                    if (!ok) Ui.note(this@SignaturesActivity, "Couldn't change the colour")
                     reload()
                 }
             }
@@ -402,7 +402,7 @@ class SignaturesActivity : BaseActivity() {
                 .setMessage("$name\n\nSaved in Downloads › Docora.\n\nTo send it on WhatsApp with the transparent background: 📎 → Document → Downloads › Docora → pick this file.")
                 .setPositiveButton("OK", null)
                 .show()
-            else Toast.makeText(this@SignaturesActivity, "Could not save the PNG", Toast.LENGTH_LONG).show()
+            else Ui.note(this@SignaturesActivity, "Could not save the PNG", long = true)
         }
     }
 

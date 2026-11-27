@@ -107,7 +107,7 @@ class SignatureEditActivity : BaseActivity() {
                 SignatureProcessor(bmp).also { bmp.recycle() }
             }
             if (p == null) {
-                Toast.makeText(this@SignatureEditActivity, "Could not open the image", Toast.LENGTH_LONG).show()
+                Ui.note(this@SignatureEditActivity, "Could not open the image", long = true)
                 finish()
                 return@launch
             }
@@ -137,13 +137,13 @@ class SignatureEditActivity : BaseActivity() {
     private fun save() {
         val bmp = result ?: return
         if (bmp.width <= 4 && bmp.height <= 4) {
-            Toast.makeText(this, "No ink found — move the slider right", Toast.LENGTH_LONG).show()
+            Ui.note(this, "No ink found — move the slider right", long = true)
             return
         }
         lifecycleScope.launch {
             val out = File(Storage.signatureDir(this@SignatureEditActivity), "sig_${System.currentTimeMillis()}.png")
             withContext(Dispatchers.IO) { ImageUtils.savePng(SigColors.fit43(bmp), out) }
-            Toast.makeText(this@SignatureEditActivity, "Signature saved", Toast.LENGTH_SHORT).show()
+            Ui.note(this@SignatureEditActivity, "Signature saved")
             setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_OUT, out.absolutePath))
             finish()
         }

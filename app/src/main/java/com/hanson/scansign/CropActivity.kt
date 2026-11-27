@@ -117,7 +117,7 @@ class CropActivity : BaseActivity() {
         lifecycleScope.launch {
             val bmp = withContext(Dispatchers.IO) { ImageUtils.load(File(path)) }
             if (bmp == null) {
-                Toast.makeText(this@CropActivity, "Could not open this image", Toast.LENGTH_LONG).show()
+                Ui.note(this@CropActivity, "Could not open this image", long = true)
                 finish()
                 return@launch
             }
@@ -163,7 +163,7 @@ class CropActivity : BaseActivity() {
         lifecycleScope.launch {
             val quad = withContext(Dispatchers.Default) { Scanner.detect(bmp) }
             if (quad != null) cropView.setQuad(quad)
-            else Toast.makeText(this@CropActivity, "No clear page edges found — adjust by hand", Toast.LENGTH_SHORT).show()
+            else Ui.note(this@CropActivity, "No clear page edges found — adjust by hand")
             setBusy(false)
         }
     }

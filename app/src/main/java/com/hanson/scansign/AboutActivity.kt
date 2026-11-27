@@ -215,7 +215,7 @@ class AboutActivity : BaseActivity() {
         try {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
         } catch (e: Exception) {
-            Toast.makeText(this, "No browser found", Toast.LENGTH_SHORT).show()
+            Ui.note(this, "No browser found")
         }
     }
 }

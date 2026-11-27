@@ -291,7 +291,7 @@ object TranslateSheet {
         }
         copyBtn.setOnClickListener {
             (a.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("translation", result.text))
-            Toast.makeText(a, "Copied", Toast.LENGTH_SHORT).show()
+            Ui.note(a, "Copied")
         }
         shareBtn.setOnClickListener {
             a.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {

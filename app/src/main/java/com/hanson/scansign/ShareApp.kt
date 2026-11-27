@@ -53,7 +53,7 @@ object ShareApp {
         try {
             a.startActivity(Intent.createChooser(send, "Share Docora with friends"))
         } catch (_: Throwable) {
-            Toast.makeText(a, "No app found to share with", Toast.LENGTH_SHORT).show()
+            Ui.note(a, "No app found to share with")
         }
     }
 

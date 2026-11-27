@@ -143,7 +143,7 @@ class MainActivity : BaseActivity() {
         })
 
         if (!App.openCvReady) {
-            Toast.makeText(this, "Edge detection engine failed to load — manual cropping still works", Toast.LENGTH_LONG).show()
+            Ui.note(this, "Edge detection engine failed to load — manual cropping still works", long = true)
         }
         if (savedInstanceState == null) handleIncoming(intent)
         if (savedInstanceState == null) CrashReport.offer(this)
@@ -190,7 +190,7 @@ class MainActivity : BaseActivity() {
             val name = withContext(Dispatchers.IO) { Storage.displayName(this@MainActivity, uri) } ?: "document.pdf"
             val f = withContext(Dispatchers.IO) { Storage.copyUriToWork(this@MainActivity, uri, "pdf") }
             if (f == null) {
-                Toast.makeText(this@MainActivity, "Could not open that PDF", Toast.LENGTH_LONG).show()
+                Ui.note(this@MainActivity, "Could not open that PDF", long = true)
                 return@launch
             }
             startActivity(PdfEditorActivity.intent(this@MainActivity, f, name, uri))
@@ -305,7 +305,7 @@ class MainActivity : BaseActivity() {
                 3 -> try {
                     Storage.openPdfExternally(this, f)
                 } catch (e: Exception) {
-                    Toast.makeText(this, "No other PDF app installed", Toast.LENGTH_SHORT).show()
+                    Ui.note(this, "No other PDF app installed")
                 }
                 4 -> rename(f)
                 5 -> MaterialAlertDialogBuilder(this)
@@ -338,7 +338,7 @@ class MainActivity : BaseActivity() {
             .setPositiveButton("Rename") { _, _ ->
                 val target = File(f.parentFile, Storage.cleanName(input.text.toString()) + ".pdf")
                 if (target.exists() && target != f) {
-                    Toast.makeText(this, "A file with that name already exists", Toast.LENGTH_SHORT).show()
+                    Ui.note(this, "A file with that name already exists")
                 } else {
                     f.renameTo(target)
                     thumbCache.remove(f.absolutePath)

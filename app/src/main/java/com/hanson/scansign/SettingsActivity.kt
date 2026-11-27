@@ -104,7 +104,7 @@ class SettingsActivity : BaseActivity() {
             lifecycleScope.launch {
                 val freed = withContext(kotlinx.coroutines.Dispatchers.IO) { Storage.cleanTemp(this@SettingsActivity, 10L * 60 * 1000, photosOlderThanMs = 3L * 60 * 60 * 1000) }
                 clearTemp.isEnabled = true
-                android.widget.Toast.makeText(this@SettingsActivity, "Freed ${mb(freed)}", android.widget.Toast.LENGTH_SHORT).show()
+                Ui.note(this@SettingsActivity, "Freed ${mb(freed)}")
                 showTemp()
             }
         }

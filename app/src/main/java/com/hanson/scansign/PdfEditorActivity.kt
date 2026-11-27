@@ -124,7 +124,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                 bmp.recycle()
                 out
             }
-            if (f == null) Toast.makeText(this@PdfEditorActivity, "Could not open that picture", Toast.LENGTH_SHORT).show()
+            if (f == null) Ui.note(this@PdfEditorActivity, "Could not open that picture")
             else {
                 val target = pendingImageRect
                 pendingImageRect = null
@@ -196,7 +196,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         findViewById<MaterialButton>(R.id.selCopy).setOnClickListener {
             (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager)
                 .setPrimaryClip(android.content.ClipData.newPlainText("text", selText))
-            Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
+            Ui.note(this, "Copied")
             doc.clearTextSelection()
         }
         findViewById<MaterialButton>(R.id.selAll).setOnClickListener { doc.selectAllText() }
@@ -234,7 +234,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             val f = withContext(Dispatchers.IO) { Storage.copyUriToWork(this@PdfEditorActivity, uri, "pdf") }
             if (f == null) {
                 setLoading(false, null)
-                Toast.makeText(this@PdfEditorActivity, "Could not open that PDF", Toast.LENGTH_LONG).show()
+                Ui.note(this@PdfEditorActivity, "Could not open that PDF", long = true)
                 finish()
                 return@launch
             }
@@ -281,7 +281,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                 upgrade(result.pdf)
                 if (result.pdf.editable) next?.invoke()
             } else {
-                Toast.makeText(this@PdfEditorActivity, "This PDF can be read, but it can't be edited", Toast.LENGTH_LONG).show()
+                Ui.note(this@PdfEditorActivity, "This PDF can be read, but it can't be edited", long = true)
             }
         }
     }
@@ -340,7 +340,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             PageRenderer(p.displayFile)
         } catch (e: Throwable) {
             setLoading(false, null)
-            Toast.makeText(this, "Can't display this PDF", Toast.LENGTH_LONG).show()
+            Ui.note(this, "Can't display this PDF", long = true)
             finish()
             return
         }
@@ -372,7 +372,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             formBanner.postDelayed({ formBanner.visibility = View.GONE }, 5000)
         }
         if (!p.editable && !p.preliminary) {
-            Toast.makeText(this, "This PDF can be viewed, but it can't be edited", Toast.LENGTH_LONG).show()
+            Ui.note(this, "This PDF can be viewed, but it can't be edited", long = true)
         }
         // open straight into full-screen reading (forms stay in normal mode so they're easy to fill)
         if (!recordedOpen) {
@@ -423,14 +423,14 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         doc.drawAllValues = !full.valuesBaked && full.fields.isNotEmpty()
         toolbar.subtitle = "${full.geoms.size} page${if (full.geoms.size == 1) "" else "s"}" +
             if (full.fields.isNotEmpty()) " · ${full.fields.size} form fields" else ""
-        if (!full.editable) Toast.makeText(this, "This PDF can be viewed, but it can't be edited", Toast.LENGTH_LONG).show()
+        if (!full.editable) Ui.note(this, "This PDF can be viewed, but it can't be edited", long = true)
     }
 
     private fun requireEditable(retry: (() -> Unit)? = null): Boolean {
         if (needsFull || preparing) { prepareEditing(retry); return false }
         val p = pdf ?: return false
         if (!p.editable) {
-            Toast.makeText(this, "This PDF can be viewed, but it can't be edited", Toast.LENGTH_SHORT).show()
+            Ui.note(this, "This PDF can be viewed, but it can't be edited")
             return false
         }
         return !busy
@@ -523,7 +523,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     override fun onNeedPageText(page: Int) {
         val r = renderer ?: return
         if (!textJobs.add(page)) return
-        Toast.makeText(this, "Finding text on this page…", Toast.LENGTH_SHORT).show()
+        Ui.note(this, "Finding text on this page…")
         r.renderPage(page, 2200, stillWanted = { true }) { bmp ->
             if (bmp == null) { textJobs.remove(page); doc.setPageWords(page, emptyList()); return@renderPage }
             lifecycleScope.launch {
@@ -548,7 +548,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         if (text == null) { textBar.visibility = View.GONE; return }
         if (text.isEmpty() || anchor == null) {
             textBar.visibility = View.GONE
-            Toast.makeText(this, "No text found here", Toast.LENGTH_SHORT).show()
+            Ui.note(this, "No text found here")
             return
         }
         selText = text
@@ -740,19 +740,17 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         val p = pdf ?: return
         lifecycleScope.launch {
             val lay = layoutFor(page)
-            if (lay == null) { Toast.makeText(this@PdfEditorActivity, "Couldn't read this page", Toast.LENGTH_SHORT).show(); return@launch }
+            if (lay == null) { Ui.note(this@PdfEditorActivity, "Couldn't read this page"); return@launch }
             val slopX = 10 * resources.displayMetrics.density / doc.pageScreenWidth(page)
             val slopY = slopX * p.geoms[page].dispW / p.geoms[page].dispH
             val line = lay.lineAt(fx, fy, slopX, slopY)
             val img = lay.imageAt(fx, fy)
             when {
                 active == ActiveTool.BETA_IMAGE && img != null -> imageMenu(img)
-                active == ActiveTool.BETA_IMAGE -> Toast.makeText(this@PdfEditorActivity, "No picture here — pictures have orange dashed boxes", Toast.LENGTH_SHORT).show()
+                active == ActiveTool.BETA_IMAGE -> Ui.note(this@PdfEditorActivity, "No picture here — pictures have orange dashed boxes")
                 line != null -> startTyping(lay, line)
                 img != null -> imageMenu(img)
-                else -> Toast.makeText(this@PdfEditorActivity,
-                    if (lay.lines.isEmpty()) "No text found on this page" else "No text here — use Add text to write something new",
-                    Toast.LENGTH_SHORT).show()
+                else -> Ui.note(this@PdfEditorActivity, if (lay.lines.isEmpty()) "No text found on this page" else "No text here — use Add text to write something new")
             }
         }
     }
@@ -1356,7 +1354,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                     when (which) {
                         0 -> {
                             val piece = bmp?.let { BetaEdit.crop(it, r) }
-                            if (piece == null) { Toast.makeText(this@PdfEditorActivity, "Couldn't copy this picture", Toast.LENGTH_SHORT).show(); return@launch }
+                            if (piece == null) { Ui.note(this@PdfEditorActivity, "Couldn't copy this picture"); return@launch }
                             val file = withContext(Dispatchers.IO) {
                                 Storage.newWorkFile(this@PdfEditorActivity, "png").also { ImageUtils.savePng(piece, it) }
                             }
@@ -1785,10 +1783,10 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         for (v in listOf(btnFullTranslate, btnExitFull)) {
             val appearing = v.visibility != View.VISIBLE
             fade(v, true)
-            // a small pop as they appear
+            // a gentle grow as they appear
             if (appearing) {
-                v.scaleX = 0.6f; v.scaleY = 0.6f
-                v.animate().scaleX(1f).scaleY(1f).setInterpolator(android.view.animation.OvershootInterpolator(2f)).setDuration(260)
+                v.scaleX = 0.85f; v.scaleY = 0.85f
+                v.animate().scaleX(1f).scaleY(1f).setInterpolator(android.view.animation.OvershootInterpolator(1.2f)).setDuration(220)
             }
         }
         btnExitFull.removeCallbacks(hideExit)
@@ -1994,7 +1992,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         val prefs = getSharedPreferences("hints", MODE_PRIVATE)
         if (prefs.getBoolean(key, false)) return
         prefs.edit().putBoolean(key, true).apply()
-        Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+        Ui.note(this, msg, long = true)
     }
 
     /** Add a new text box ([existing] == null) or edit one. */
@@ -2209,7 +2207,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
 
     private fun printCurrent() {
         val p = pdf ?: return
-        if (dirty) Toast.makeText(this, "Printing the last saved version — save to include your edits", Toast.LENGTH_LONG).show()
+        if (dirty) Ui.note(this, "Printing the last saved version — save to include your edits", long = true)
         Ui.print(this, p.displayFile, displayName)
     }
 
@@ -2443,7 +2441,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
 
     private fun openPages() {
         val p = pdf ?: return
-        if (!p.editable) { Toast.makeText(this, "This PDF can't be edited", Toast.LENGTH_SHORT).show(); return }
+        if (!p.editable) { Ui.note(this, "This PDF can't be edited"); return }
         if (dirty) {
             MaterialAlertDialogBuilder(this)
                 .setTitle("Save your changes first")
@@ -2731,7 +2729,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     private fun compressCurrent() {
         commitEdit()
         val p = pdf ?: return
-        if (!p.editable) { Toast.makeText(this, "This PDF can't be edited", Toast.LENGTH_SHORT).show(); return }
+        if (!p.editable) { Ui.note(this, "This PDF can't be edited"); return }
         doc.select(null)
         setLoading(true, if (dirty) "Applying your edits…" else "Preparing…")
         val snapshot = items.map { it.copy() }
@@ -2744,7 +2742,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                 } catch (e: Throwable) { null }
             }
             setLoading(false, null)
-            if (base == null) { Toast.makeText(this@PdfEditorActivity, "Could not prepare the PDF", Toast.LENGTH_LONG).show(); return@launch }
+            if (base == null) { Ui.note(this@PdfEditorActivity, "Could not prepare the PDF", long = true); return@launch }
             ShareSheet.compress(this@PdfEditorActivity, base, displayName) { compressed ->
                 lifecycleScope.launch {
                     val writable = inLibrary() || withContext(Dispatchers.IO) { canWriteBack() }
@@ -2786,7 +2784,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                 thenOrganize -> pdf?.let { organize.launch(OrganizeActivity.intent(this, it.file, displayName)) }
                 thenShare -> Ui.share(this, source)
                 thenFinish -> { if (thenTools) { startActivity(Intent(this, ToolsActivity::class.java)); reopening = true }; finish() }
-                else -> Toast.makeText(this, "No changes to save", Toast.LENGTH_SHORT).show()
+                else -> Ui.note(this, "No changes to save")
             }
             return
         }
@@ -2864,7 +2862,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         }
         replace.setOnClickListener {
             if (canReplace) { useReplace = true; refresh() }
-            else Toast.makeText(this, "This file can't be changed — save a copy instead", Toast.LENGTH_SHORT).show()
+            else Ui.note(this, "This file can't be changed — save a copy instead")
         }
         copy.setOnClickListener { useReplace = false; refresh() }
         refresh()
@@ -2885,7 +2883,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                 if (where.checkedChipId == R.id.wherePick) {
                     pendingCopy = Pair(n, lock)
                     pendingPrepared = prepared
-                    try { createDoc.launch("$n.pdf") } catch (e: Exception) { Toast.makeText(this, "No file picker available", Toast.LENGTH_SHORT).show() }
+                    try { createDoc.launch("$n.pdf") } catch (e: Exception) { Ui.note(this, "No file picker available") }
                 } else {
                     performSave(Storage.uniquePdf(this, n), overwrite = false, flatten = lock, export = true, copyTo = null, showDialog = !thenFinish && !thenShare && !thenOrganize, prepared = prepared)
                 }
@@ -2920,7 +2918,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             }
             setLoading(false, null)
             if (result == null) {
-                Toast.makeText(this@PdfEditorActivity, "Could not save the PDF", Toast.LENGTH_LONG).show()
+                Ui.note(this@PdfEditorActivity, "Could not save the PDF", long = true)
                 return@launch
             }
             val (file, exported, copied) = result
@@ -2932,7 +2930,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                     .show()
             }
             if (finishAfterSave) {
-                Toast.makeText(this@PdfEditorActivity, "Saved", Toast.LENGTH_SHORT).show()
+                Ui.note(this@PdfEditorActivity, "Saved")
                 dirty = false
                 if (toolsAfterSave) {
                     toolsAfterSave = false
@@ -2957,9 +2955,8 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                     .setOnDismissListener { RateApp.goodMoment(this@PdfEditorActivity) }
                     .show()
                 else -> {
-                    Toast.makeText(this@PdfEditorActivity,
-                        (if (prepared != null) "Compressed & saved · ${android.text.format.Formatter.formatShortFileSize(this@PdfEditorActivity, file.length())}" else "Saved") +
-                            (if (exported) " · copy in Downloads › Docora" else ""), Toast.LENGTH_LONG).show()
+                    Ui.note(this@PdfEditorActivity, (if (prepared != null) "Compressed & saved · ${android.text.format.Formatter.formatShortFileSize(this@PdfEditorActivity, file.length())}" else "Saved") +
+                            (if (exported) " · copy in Downloads › Docora" else ""), long = true)
                     RateApp.goodMoment(this@PdfEditorActivity)
                 }
             }

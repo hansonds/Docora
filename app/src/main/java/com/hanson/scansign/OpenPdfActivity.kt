@@ -24,7 +24,7 @@ class OpenPdfActivity : Activity() {
             else -> null
         }
         if (uri == null) {
-            Toast.makeText(this, "Could not open that PDF", Toast.LENGTH_LONG).show()
+            Ui.note(this, "Could not open that PDF", long = true)
         } else {
             // pass on exactly the access we were given (read, and write if allowed)
             val grants = i.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
