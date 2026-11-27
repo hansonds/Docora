@@ -45,11 +45,15 @@ class PdfDocView @JvmOverloads constructor(
         fun onItemTapped(item: EditItem)
         fun onFieldTapped(widget: FormWidget)
         fun onItemsChanged()
+        /** An item was removed with its delete handle ([index] = where it was in the list). */
+        fun onItemDeleted(item: EditItem, index: Int) = onItemsChanged()
         fun onSelectionChanged(item: EditItem?)
         /** Scroll or zoom changed (used to keep the in-place field editor attached). */
         fun onViewportChanged() {}
         /** Any tap on the document (before it is handled). */
         fun onAnyTap() {}
+        /** Return true to swallow a tap at (x, y) completely (e.g. a tap next to the typing box). */
+        fun consumeTap(x: Float, y: Float): Boolean = false
         /** A pen stroke or shape was just drawn. */
         fun onItemAdded(item: EditItem) {}
         /** Long-press needs the words on [page] (call [setPageWords] when ready). */
@@ -420,10 +424,15 @@ class PdfDocView @JvmOverloads constructor(
     private val handleR = 12 * density
 
     // ---- gestures ----
-    private enum class Mode { NONE, PAN, ITEM_MOVE, ITEM_RESIZE, ITEM_ROTATE, SCROLLBAR, DRAW, SEL_START, SEL_END }
+    private enum class Mode { NONE, PAN, ITEM_MOVE, ITEM_RESIZE, ITEM_ROTATE, ITEM_DELETE, SCROLLBAR, DRAW, SEL_START, SEL_END }
     private var mode = Mode.NONE
     private var lastX = 0f
     private var lastY = 0f
+    private var downX = 0f
+    private var downY = 0f
+    private val touchSlop = android.view.ViewConfiguration.get(context).scaledTouchSlop.toFloat()
+    /** Small items (a ✓, a short date) still get a finger-sized area to grab: at least 48dp. */
+    private val minTouch = 48 * density
     private val scroller = OverScroller(context)
     private var zoomAnimator: ValueAnimator? = null
     private var scrollbarVisibleUntil = 0L
@@ -462,6 +471,8 @@ class PdfDocView @JvmOverloads constructor(
         }
 
         override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+            // the tap that just deleted an item does nothing else
+            if (android.os.SystemClock.uptimeMillis() < ignoreTapUntil) return true
             if (tool == Tool.None) handleTap(e.x, e.y)
             return true
         }
@@ -973,7 +984,7 @@ class PdfDocView @JvmOverloads constructor(
         val local = rot(xIn, yIn, r.centerX(), r.centerY(), -item.rotationDeg)
         val x = local.x; val y = local.y
         val slop = 14 * density + extra
-        val grow = RectF(r)
+        val grow = atLeast(r, minTouch)
         grow.inset(-slop / 2, -slop / 2)
         if (!grow.contains(x, y)) return false
         val pr = pageScreenRect(item.page)
@@ -993,6 +1004,14 @@ class PdfDocView @JvmOverloads constructor(
         }
     }
 
+    /** [r] grown around its centre to at least [min] wide and tall. */
+    private fun atLeast(r: RectF, min: Float): RectF {
+        val out = RectF(r)
+        if (out.width() < min) { val c = out.centerX(); out.left = c - min / 2; out.right = c + min / 2 }
+        if (out.height() < min) { val c = out.centerY(); out.top = c - min / 2; out.bottom = c + min / 2 }
+        return out
+    }
+
     /** Rotates screen point (x, y) around (cx, cy) by [deg] clockwise. */
     private fun rot(x: Float, y: Float, cx: Float, cy: Float, deg: Float): PointF {
         if (deg == 0f) return PointF(x, y)
@@ -1006,7 +1025,7 @@ class PdfDocView @JvmOverloads constructor(
     private class Handles(val box: RectF, val deg: Float, val del: PointF, val resize: PointF, val rotate: PointF?, val stemFrom: PointF?)
 
     private fun handles(s: EditItem): Handles? {
-        val r = itemRect(s) ?: return null
+        val r = atLeast(itemRect(s) ?: return null, minTouch)
         val pad = 3 * density
         val box = RectF(r.left - pad, r.top - pad, r.right + pad, r.bottom + pad)
         val deg = s.rotationDeg
@@ -1112,6 +1131,7 @@ class PdfDocView @JvmOverloads constructor(
             scroller.forceFinished(true)
             zoomAnimator?.cancel()
             lastX = e.x; lastY = e.y
+            downX = e.x; downY = e.y
             mode = pickMode(e.x, e.y)
             if (mode == Mode.PAN && tool != Tool.None && startDrawing(e.x, e.y)) mode = Mode.DRAW
             if (mode != Mode.PAN) parent?.requestDisallowInterceptTouchEvent(true)
@@ -1143,6 +1163,11 @@ class PdfDocView @JvmOverloads constructor(
                 }
                 if (e.actionMasked == MotionEvent.ACTION_POINTER_UP) twistAngle = Float.NaN
             }
+            // the delete handle only deletes on a clean tap; a finger that moves drags the item instead
+            Mode.ITEM_DELETE -> if (e.actionMasked == MotionEvent.ACTION_MOVE && hypot(e.x - downX, e.y - downY) > touchSlop) {
+                mode = Mode.ITEM_MOVE
+                dragSelected(e.x - lastX, e.y - lastY)
+            }
             Mode.SEL_START, Mode.SEL_END -> if (e.actionMasked == MotionEvent.ACTION_MOVE) dragSelectionHandle(e.x, e.y)
             Mode.DRAW -> if (e.actionMasked == MotionEvent.ACTION_MOVE) continueDrawing(e)
             Mode.PAN, Mode.NONE -> {}
@@ -1151,6 +1176,7 @@ class PdfDocView @JvmOverloads constructor(
 
         if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) {
             if (mode == Mode.ITEM_MOVE || mode == Mode.ITEM_RESIZE || mode == Mode.ITEM_ROTATE) listener?.onItemsChanged()
+            if (mode == Mode.ITEM_DELETE && e.actionMasked == MotionEvent.ACTION_UP) deleteSelected()
             twistAngle = Float.NaN
             if (mode == Mode.SEL_START || mode == Mode.SEL_END) notifySelection()
             if (mode == Mode.DRAW) finishDrawing()
@@ -1176,19 +1202,29 @@ class PdfDocView @JvmOverloads constructor(
         if (s != null) {
             val h = handles(s)
             if (h != null) {
-                val hit = handleR * 1.9f
-                if (hypot(x - h.del.x, y - h.del.y) < hit) {
-                    items.remove(s)
-                    select(null)
-                    listener?.onItemsChanged()
-                    return Mode.NONE
-                }
+                // on the item itself a handle needs a touch on its dot; around it, the usual generous area
+                val onItem = hits(s, x, y, extra = 10 * density)
+                val hit = if (onItem) handleR * 1.1f else handleR * 1.9f
+                if (hypot(x - h.del.x, y - h.del.y) < hit) return Mode.ITEM_DELETE
                 if (h.rotate != null && hypot(x - h.rotate.x, y - h.rotate.y) < hit) return Mode.ITEM_ROTATE
                 if (hypot(x - h.resize.x, y - h.resize.y) < hit) return Mode.ITEM_RESIZE
-                if (hits(s, x, y, extra = 10 * density)) return Mode.ITEM_MOVE
+                if (onItem) return Mode.ITEM_MOVE
             }
         }
         return Mode.PAN
+    }
+
+    private var ignoreTapUntil = 0L
+
+    private fun deleteSelected() {
+        ignoreTapUntil = android.os.SystemClock.uptimeMillis() + 600
+        val s = selected ?: return
+        val index = items.indexOf(s)
+        if (index < 0) return
+        items.removeAt(index)
+        select(null)
+        listener?.onItemDeleted(s, index)
+        invalidate()
     }
 
     private fun dragSelected(dx: Float, dy: Float) {
@@ -1324,6 +1360,7 @@ class PdfDocView @JvmOverloads constructor(
     }
 
     private fun handleTap(x: Float, y: Float) {
+        if (listener?.consumeTap(x, y) == true) return
         listener?.onAnyTap()
         if (selPage >= 0 || pendingSel != null) { clearTextSelection(); return }
         // items first (topmost last in list)

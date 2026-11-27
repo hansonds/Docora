@@ -58,7 +58,9 @@ class MergeActivity : BaseActivity() {
     private lateinit var summary: TextView
     private lateinit var mergeBtn: MaterialButton
 
-    private val addMore = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> add(uris) }
+    /** The file picker is open: a second tap on "Add" doesn't open another one. */
+    private var picking = false
+    private val addMore = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> picking = false; add(uris) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -98,7 +100,11 @@ class MergeActivity : BaseActivity() {
         })
         touch.attachToRecyclerView(list)
 
-        findViewById<MaterialButton>(R.id.btnAdd).setOnClickListener { addMore.launch(arrayOf("application/pdf")) }
+        findViewById<MaterialButton>(R.id.btnAdd).setOnClickListener {
+            if (picking) return@setOnClickListener
+            picking = true
+            try { addMore.launch(arrayOf("application/pdf")) } catch (_: Throwable) { picking = false }
+        }
         mergeBtn.setOnClickListener { askName() }
 
         val files = intent.getStringArrayExtra(EXTRA_FILES) ?: emptyArray()

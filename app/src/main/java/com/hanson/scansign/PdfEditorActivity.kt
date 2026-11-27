@@ -487,6 +487,25 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         record()
     }
 
+    /** Deleted with the ✕ handle: one tap on "Undo" puts that item back, even after other changes. */
+    private var deletedBar: com.google.android.material.snackbar.Snackbar? = null
+
+    override fun onItemDeleted(item: EditItem, index: Int) {
+        record()
+        deletedBar?.dismiss()
+        val bar = com.google.android.material.snackbar.Snackbar.make(doc, "Deleted", com.google.android.material.snackbar.Snackbar.LENGTH_LONG)
+        bar.setAction("Undo") {
+            if (items.contains(item)) return@setAction
+            items.add(index.coerceIn(0, items.size), item)
+            record()
+            doc.select(item)
+            doc.refresh()
+        }
+        if (dock.visibility == View.VISIBLE) bar.anchorView = dock
+        deletedBar = bar
+        bar.show()
+    }
+
     override fun onSelectionChanged(item: EditItem?) {}
 
     override fun onViewportChanged() {
@@ -552,6 +571,18 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         lp.leftMargin = left.toInt()
         lp.topMargin = top.toInt().coerceIn(0, (doc.height - h).coerceAtLeast(0))
         textBar.layoutParams = lp
+    }
+
+    /** While typing, a tap on or next to the text being edited keeps the box and the keyboard open. */
+    override fun consumeTap(x: Float, y: Float): Boolean {
+        if (typing == null || typeBox.visibility != View.VISIBLE) return false
+        val r = typingScreenRect() ?: return false
+        val m = 24 * resources.displayMetrics.density
+        r.inset(-m, -m)
+        if (!r.contains(x, y)) return false
+        typeBox.requestFocus()
+        (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(typeBox, InputMethodManager.SHOW_IMPLICIT)
+        return true
     }
 
     override fun onAnyTap() {
@@ -891,15 +922,21 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         lifecycleScope.launch {
             val (bold, italic) = detectStyle(lay, line)
             typingBold = bold; typingItalic = italic
-            val item = buildReplacement(lay.page, listOf(line), line.text, line.font, bold, italic,
-                align = BetaEdit.lineAlign(lay, line, pdf!!.geoms[lay.page]), context = lay.lines)
-            item.marks = originalMarks(item, line.charFlags)
+            // part of a paragraph: edit the whole paragraph, so a sentence across lines can be changed or deleted
+            // (the "¶ Paragraph" chip switches back to just this line)
+            val g = pdf!!.geoms[lay.page]
+            val block = lay.blockOf(line).lines
+            val whole = block.size > 1
+            val (text, flags) = if (whole) joinLinesStyled(block) else Pair(line.text, line.charFlags)
+            val item = buildReplacement(lay.page, if (whole) block else listOf(line), text, line.font, bold, italic,
+                align = if (whole) BetaEdit.blockAlign(block, g) else BetaEdit.lineAlign(lay, line, g), context = lay.lines)
+            item.marks = originalMarks(item, flags)
             typingMarks = item.marks.joinToString { "${it.start}-${it.end}-${it.flags}" }
             items.add(item)
             typingIsNew = true
             typingBackup = null
-            typingLay = lay; typingLine = line; typingWhole = false
-            typingOriginal = line.text
+            typingLay = lay; typingLine = line; typingWhole = whole
+            typingOriginal = text
             typingInk = item.color
             showTyping(item)
         }
@@ -965,10 +1002,18 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         typeBaselineShift = TextRender.ASCENT * item.sizePt * px + typeBox.paint.fontMetrics.ascent
         // paragraph indent on the first line
         val ed = typeBox.text
-        ed.getSpans(0, ed.length, android.text.style.LeadingMarginSpan.Standard::class.java).forEach { ed.removeSpan(it) }
-        if (item.indentPt > 0f) ed.setSpan(android.text.style.LeadingMarginSpan.Standard((item.indentPt * px).toInt(), 0),
-            0, ed.length, android.text.Spanned.SPAN_INCLUSIVE_INCLUSIVE)
-        if (android.os.Build.VERSION.SDK_INT >= 28) typeBox.lineHeight = (item.lineGap * item.sizePt * px).toInt().coerceAtLeast(1)
+        val indentPx = if (item.indentPt > 0f) (item.indentPt * px).toInt() else 0
+        val oldIndent = ed.getSpans(0, ed.length, android.text.style.LeadingMarginSpan.Standard::class.java)
+        val sameIndent = if (indentPx == 0) oldIndent.isEmpty()
+            else oldIndent.size == 1 && oldIndent[0].getLeadingMargin(true) == indentPx &&
+                ed.getSpanStart(oldIndent[0]) == 0 && ed.getSpanEnd(oldIndent[0]) == ed.length
+        if (!sameIndent) {
+            oldIndent.forEach { ed.removeSpan(it) }
+            if (indentPx > 0) ed.setSpan(android.text.style.LeadingMarginSpan.Standard(indentPx, 0),
+                0, ed.length, android.text.Spanned.SPAN_INCLUSIVE_INCLUSIVE)
+        }
+        val lh = (item.lineGap * item.sizePt * px).toInt().coerceAtLeast(1)
+        if (android.os.Build.VERSION.SDK_INT >= 28) { if (typeBox.lineHeight != lh) typeBox.lineHeight = lh }
         else typeBox.setLineSpacing(0f, item.lineGap / 1.17f)
         typeBox.gravity = android.view.Gravity.TOP or when (item.align) {
             TextAlign.CENTER -> android.view.Gravity.CENTER_HORIZONTAL
@@ -1113,6 +1158,8 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             styleTypeBox()
             positionTyping()
             buildTypeTools()
+            typeBox.requestFocus()
+            typeBox.postDelayed({ typingScreenRect()?.let { doc.ensureVisible(it) } }, 250)
         }
     }
 
@@ -1210,7 +1257,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                 record()
             }
             typingIsNew && raw == typingOriginal && backup == null && item.font == typingLine?.font &&
-                item.bold == typingBold && item.italic == typingItalic && item.color == typingInk && !typingWhole &&
+                item.bold == typingBold && item.italic == typingItalic && item.color == typingInk &&
                 newMarks.joinToString { "${it.start}-${it.end}-${it.flags}" } == typingMarks -> items.remove(item)
             else -> {
                 item.marks = newMarks
@@ -2020,8 +2067,8 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         updateUndoButtons()
     }
 
-    private fun undo() { if (hIndex > 0) { hIndex--; restore(history[hIndex]) } }
-    private fun redo() { if (hIndex < history.size - 1) { hIndex++; restore(history[hIndex]) } }
+    private fun undo() { deletedBar?.dismiss(); if (hIndex > 0) { hIndex--; restore(history[hIndex]) } }
+    private fun redo() { deletedBar?.dismiss(); if (hIndex < history.size - 1) { hIndex++; restore(history[hIndex]) } }
 
     private fun updateUndoButtons() {
         val canUndo = hIndex > 0
@@ -2066,7 +2113,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
                     getSharedPreferences("view", MODE_PRIVATE).edit().putBoolean("night", item.isChecked).apply()
                     doc.nightMode = item.isChecked
                 }
-                6 -> startActivity(Intent(this, ToolsActivity::class.java))
+                6 -> openToolsHub()
                 13 -> translatePage()
             }
             true
@@ -2562,6 +2609,24 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         super.finish()
     }
 
+    /** "More PDF tools" leaves the editor: unsaved edits are never dropped without asking. */
+    private fun openToolsHub() {
+        if (typing != null) finishTyping(true)
+        if (editingWidget != null) commitEdit()
+        if (!dirty) { startActivity(Intent(this, ToolsActivity::class.java)); return }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Save changes?")
+            .setMessage("You have unsaved changes to this PDF.")
+            .setPositiveButton("Save") { _, _ -> quickSave(thenFinish = true, thenTools = true) }
+            .setNegativeButton("Discard") { _, _ ->
+                startActivity(Intent(this, ToolsActivity::class.java))
+                reopening = true   // leaving for another Docora screen, not back to the other app
+                finish()
+            }
+            .setNeutralButton("Keep editing", null)
+            .show()
+    }
+
     private fun confirmLeave() {
         if (typing != null) { finishTyping(true); return }
         if (editingWidget != null) { commitEdit(); return }
@@ -2571,7 +2636,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             .setMessage("You have unsaved changes to this PDF.")
             .setPositiveButton("Save") { _, _ -> quickSave(thenFinish = true) }
             .setNegativeButton("Discard") { _, _ -> finish() }
-            .setNeutralButton("Cancel", null)
+            .setNeutralButton("Keep editing", null)
             .show()
     }
 
@@ -2580,6 +2645,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     private var organizeAfterSave = false
     private var shareAfterSave = false
     private var finishAfterSave = false
+    private var toolsAfterSave = false
     /** Original location of a PDF opened from another app / the file picker. */
     private var sourceUri: android.net.Uri? = null
     private var pendingCopy: Pair<String, Boolean>? = null
@@ -2638,27 +2704,27 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     }
 
     /** Asks how to save (replace the original or keep it and save a copy), then does what was requested after. */
-    private fun quickSave(thenOrganize: Boolean = false, thenShare: Boolean = false, thenFinish: Boolean = false) {
+    private fun quickSave(thenOrganize: Boolean = false, thenShare: Boolean = false, thenFinish: Boolean = false, thenTools: Boolean = false) {
         commitEdit()
         pdf ?: return
         if (!dirty) {
             when {
                 thenOrganize -> pdf?.let { organize.launch(OrganizeActivity.intent(this, it.file, displayName)) }
                 thenShare -> Ui.share(this, source)
-                thenFinish -> finish()
+                thenFinish -> { if (thenTools) { startActivity(Intent(this, ToolsActivity::class.java)); reopening = true }; finish() }
                 else -> Toast.makeText(this, "No changes to save", Toast.LENGTH_SHORT).show()
             }
             return
         }
         lifecycleScope.launch {
             val writable = inLibrary() || withContext(Dispatchers.IO) { canWriteBack() }
-            showSaveSheet(writable, thenOrganize, thenShare, thenFinish)
+            showSaveSheet(writable, thenOrganize, thenShare, thenFinish, thenTools = thenTools)
         }
     }
 
     private fun saveDialog(thenOrganize: Boolean = false) = quickSave(thenOrganize = thenOrganize)
 
-    private fun showSaveSheet(canReplace: Boolean, thenOrganize: Boolean, thenShare: Boolean, thenFinish: Boolean, prepared: File? = null) {
+    private fun showSaveSheet(canReplace: Boolean, thenOrganize: Boolean, thenShare: Boolean, thenFinish: Boolean, prepared: File? = null, thenTools: Boolean = false) {
         val p = pdf ?: return
         val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
         val v = LayoutInflater.from(this).inflate(R.layout.sheet_save, null)
@@ -2734,6 +2800,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             organizeAfterSave = thenOrganize
             shareAfterSave = thenShare
             finishAfterSave = thenFinish
+            toolsAfterSave = thenTools
             sheet.dismiss()
             val lock = flatten.isChecked
             if (useReplace) {
@@ -2793,6 +2860,11 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             if (finishAfterSave) {
                 Toast.makeText(this@PdfEditorActivity, "Saved", Toast.LENGTH_SHORT).show()
                 dirty = false
+                if (toolsAfterSave) {
+                    toolsAfterSave = false
+                    startActivity(Intent(this@PdfEditorActivity, ToolsActivity::class.java))
+                    reopening = true
+                }
                 finish()
                 return@launch
             }

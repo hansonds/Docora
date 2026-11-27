@@ -16,7 +16,7 @@ object Settings {
 
     fun useAiScanner(ctx: Context) = prefs(ctx).getString(SCANNER, "ai") == "ai"
     fun searchableDefault(ctx: Context) = prefs(ctx).getBoolean(SEARCHABLE, true)
-    fun openFullscreen(ctx: Context) = prefs(ctx).getBoolean(OPEN_FULLSCREEN, true)
+    fun openFullscreen(ctx: Context) = prefs(ctx).getBoolean(OPEN_FULLSCREEN, false)
 
     fun defaultFilter(ctx: Context): ScanFilter =
         runCatching { ScanFilter.valueOf(prefs(ctx).getString(DEFAULT_FILTER, ScanFilter.AUTO.name)!!) }.getOrDefault(ScanFilter.AUTO)

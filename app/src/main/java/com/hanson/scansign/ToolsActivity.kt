@@ -47,20 +47,42 @@ class ToolsActivity : BaseActivity() {
         NUMBERS("Page numbers", "Number every page", R.drawable.ic_numbers, R.color.icon_tile_2, R.color.md_secondary, "Stamp pages")
     }
 
+    /** The tool waiting for a file. Kept if Android rebuilds this screen while the file picker is open. */
     private var pending: Tool? = null
+    /** The file picker is open (or opening): other taps are ignored, so it never opens twice. */
+    private var picking = false
 
     private val pickOne = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        val t = pending ?: return@registerForActivityResult
-        if (uri != null) loadInputs(t, listOf(uri))
+        picking = false
+        val t = pending
+        if (t == null) { Ui.toast(this, "Please choose the tool again"); return@registerForActivityResult }
+        if (uri != null) loadInputs(t, listOf(uri)) else Ui.toast(this, "No file chosen — nothing was changed")
     }
 
     private val pickMany = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        val t = pending ?: return@registerForActivityResult
-        if (uris.isNotEmpty()) loadInputs(t, uris)
+        picking = false
+        val t = pending
+        if (t == null) { Ui.toast(this, "Please choose the tool again"); return@registerForActivityResult }
+        if (uris.isNotEmpty()) loadInputs(t, uris) else Ui.toast(this, "No files chosen — nothing was changed")
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        pending?.let { outState.putString(STATE_PENDING, it.name) }
+    }
+
+    /** Shown when an options screen is closed without running the tool. */
+    private fun cancelled() = Ui.toast(this, "Cancelled — nothing was changed")
+
+    private fun MaterialAlertDialogBuilder.cancelNote(): MaterialAlertDialogBuilder {
+        setNegativeButton("Cancel") { _, _ -> cancelled() }
+        setOnCancelListener { cancelled() }
+        return this
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pending = savedInstanceState?.getString(STATE_PENDING)?.let { n -> Tool.values().firstOrNull { it.name == n } }
         setContentView(R.layout.activity_tools)
         findViewById<MaterialToolbar>(R.id.toolbar).setNavigationOnClickListener { finish() }
         val container = findViewById<LinearLayout>(R.id.container)
@@ -119,12 +141,26 @@ class ToolsActivity : BaseActivity() {
     }
 
     private fun start(t: Tool) {
+        if (picking) return
+        if (t == Tool.IMAGES) { startActivity(ScanActivity.intent(this, ScanActivity.START_GALLERY)); return }
         pending = t
-        when (t) {
-            Tool.IMAGES -> startActivity(ScanActivity.intent(this, ScanActivity.START_GALLERY))
-            Tool.MERGE -> pickMany.launch(arrayOf("application/pdf"))
-            else -> pickOne.launch(arrayOf("application/pdf"))
+        picking = true
+        try {
+            if (t == Tool.MERGE) pickMany.launch(arrayOf("application/pdf")) else pickOne.launch(arrayOf("application/pdf"))
+        } catch (_: Throwable) {
+            picking = false
+            Ui.toast(this, "No file picker available on this phone")
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // back on this screen with no picker result on its way (e.g. the picker failed to open)
+        window.decorView.postDelayed({ if (!isFinishing && hasWindowFocus()) picking = false }, 1500)
+    }
+
+    companion object {
+        private const val STATE_PENDING = "pending_tool"
     }
 
     private class Input(val file: File, val name: String, val uri: Uri? = null) {
@@ -132,14 +168,21 @@ class ToolsActivity : BaseActivity() {
     }
 
     private fun loadInputs(t: Tool, uris: List<Uri>) {
-        lifecycleScope.launch {
-            val inputs = withContext(Dispatchers.IO) {
-                uris.mapNotNull { u ->
-                    val f = Storage.copyUriToWork(this@ToolsActivity, u, "pdf") ?: return@mapNotNull null
-                    Input(f, Storage.displayName(this@ToolsActivity, u) ?: "document.pdf", u)
-                }
+        // show that something is happening while the file is copied in (large files take a moment)
+        Ui.runJob(this, "Opening", { p ->
+            uris.mapIndexedNotNull { i, u ->
+                if (uris.size > 1) p(i, uris.size)
+                val f = Storage.copyUriToWork(this@ToolsActivity, u, "pdf") ?: return@mapIndexedNotNull null
+                Input(f, Storage.displayName(this@ToolsActivity, u) ?: "document.pdf", u)
             }
-            if (inputs.isEmpty()) { Ui.toast(this@ToolsActivity, "Could not open the file"); return@launch }
+        }) { inputs ->
+            if (inputs.isEmpty()) {
+                MaterialAlertDialogBuilder(this).setTitle("Couldn't open the file")
+                    .setMessage("Docora couldn't read the chosen file. Please try again or pick another PDF.")
+                    .setPositiveButton("OK", null).show()
+                return@runJob
+            }
+            if (inputs.size < uris.size) Ui.toast(this, "${uris.size - inputs.size} file(s) couldn't be opened")
             run(t, inputs)
         }
     }
@@ -219,7 +262,7 @@ class ToolsActivity : BaseActivity() {
                     else -> splitEvery(input, 1)
                 }
             }
-            .setNegativeButton("Cancel", null)
+            .cancelNote()
             .show()
     }
 
@@ -248,7 +291,7 @@ class ToolsActivity : BaseActivity() {
                 val ops = rs.flatMap { r -> r.map { PageOp(it) } }
                 saveJob("Extracting", "${input.base}_extract") { out, _ -> PdfTools.organize(input.file, ops, out) }
             }
-            .setNegativeButton("Cancel", null)
+            .cancelNote()
             .show()
     }
 
@@ -285,7 +328,7 @@ class ToolsActivity : BaseActivity() {
                         .setPositiveButton("OK", null).show()
                 }
             }
-            .setNegativeButton("Cancel", null)
+            .cancelNote()
             .show()
     }
 
@@ -302,7 +345,7 @@ class ToolsActivity : BaseActivity() {
                     PdfTools.makeSearchable(this, input.file, input.file, out, p)
                 }
             }
-            .setNegativeButton("Cancel", null)
+            .cancelNote()
             .show()
     }
 
@@ -325,7 +368,7 @@ class ToolsActivity : BaseActivity() {
                 if (a != p2.text.toString()) { Ui.toast(this, "The passwords don't match"); return@setPositiveButton }
                 saveJob("Encrypting", "${input.base}_locked") { out, _ -> PdfTools.protect(input.file, out, a) }
             }
-            .setNegativeButton("Cancel", null)
+            .cancelNote()
             .show()
     }
 
@@ -337,7 +380,7 @@ class ToolsActivity : BaseActivity() {
             .setPositiveButton("Unlock") { _, _ ->
                 saveJob("Unlocking", "${input.base}_unlocked") { out, _ -> PdfTools.unlock(input.file, out, p.text.toString()) }
             }
-            .setNegativeButton("Cancel", null)
+            .cancelNote()
             .show()
     }
 
@@ -367,7 +410,7 @@ class ToolsActivity : BaseActivity() {
                     PdfTools.watermark(input.file, out, t, color, opacity.value, size.value, diag.isChecked, p)
                 }
             }
-            .setNegativeButton("Cancel", null)
+            .cancelNote()
             .show()
     }
 
@@ -394,7 +437,7 @@ class ToolsActivity : BaseActivity() {
                 val s = start.text.toString().toIntOrNull() ?: 1
                 saveJob("Numbering pages", "${input.base}_numbered") { out, pr -> PdfTools.pageNumbers(input.file, out, p, f, s, pr) }
             }
-            .setNegativeButton("Cancel", null)
+            .cancelNote()
             .show()
     }
 }

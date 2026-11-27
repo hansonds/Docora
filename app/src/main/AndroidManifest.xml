@@ -61,7 +61,7 @@
         <activity android:name=".SignaturesActivity" />
         <activity
             android:name=".PdfEditorActivity"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|navigation|uiMode"
             android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".CameraActivity"
