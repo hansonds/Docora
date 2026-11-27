@@ -32,38 +32,49 @@
 
 **Edit PDF (beta)**
 - Tap any line or paragraph and type: the new words keep the original font, size, colour and spacing
+- Whole paragraphs open together, so you can change or delete a sentence across lines; table cells and rows stay separate
+- If you type a letter the PDF's own font doesn't contain, the whole text switches to a matching font, so no letter looks different
 - Bold, italic and underline for whole lines or just selected words; left, centre, right or justified alignment; widen the text box
 - Move, resize, replace or delete pictures and logos
 - Find & replace across the whole document
 - Black out private details (removed for good when you save)
 - Works on scanned pages too, with on-device text recognition
+- Asks **Save / Discard / Keep editing** before you leave with unsaved changes
 
 **Translate (new)**
 - Translate selected text or a whole page into **59 languages**, on your phone
-- **Translated page view**: the translation is drawn right on the page, matching the original layout, colours and text size, like a camera translator. Hold the page to compare with the original
+- **Translated page view**: the translation is drawn right on the page, matching the original layout, colours and text size, like a camera translator. Scroll through the pages like a normal document, tap a page to zoom, hold it to compare with the original
 - Detects the language of each paragraph by itself, and works on scanned pages
+- Downloaded languages are listed first
 - Save the translated document as a **new PDF** (documents up to 40 pages; longer ones translate the page you're reading)
 - Download only the languages you need (about 30 MB each, once), then everything works offline. Wi-Fi-only option, and delete languages any time
 - Also available from full-screen reading with a small button
+- If a language download stays on "waiting", Docora explains simple fixes
 
 **Scan**
 - AI scanner (Google ML Kit, on-device): accurate edge detection, auto capture, removes shadows, stains and fingers
 - Built-in camera with live edge detection as a backup (choose in Settings)
 - Import from photos, adjust corners by hand with a magnifier
-- Filters: Auto, Magic colour, Original, Grayscale, Black & white. Pick one on the first page and the whole document uses it
+- Filters: Auto, Magic colour, As scanned, Grayscale (shadows removed), Black & white. Pick one on the first page and the whole document uses it
+- A "Processing" screen while pages are prepared; reorder, rotate or delete pages before saving
+- "Keep for later" pages survive even if the phone closes the app
 - Multi-page PDFs, A4 / Letter / fit, ID-card layout (both sides on one page)
 - Searchable PDFs: on-device OCR adds a hidden text layer
 
 **Read** (any PDF: thousands of pages, password-protected or damaged)
-- Opens in full screen for distraction-free reading; long books open almost instantly
+- Opens with the toolbar ready (Translate, Edit PDF, Sign, Quick fill, Text); full-screen reading on a tap, or by default if you prefer (Settings)
+- Long books open almost instantly, and zoomed pages turn sharp right away
 - Find text with highlighted matches, even in scans
 - Smooth zoom, fast scrolling, page thumbnails, go to page, night reading
 - Long-press to select, copy, share or translate text
+- Opened a PDF from WhatsApp or another app? Back takes you straight back there
 
 **Sign, fill & mark up**
-- Signatures from a photo (background removed automatically) or drawn by finger; save them as transparent PNG
+- Signatures from a photo (background removed automatically) or drawn by finger; save them as transparent PNG (always 4:3)
+- Choose the signature colour when you place it (original, black, blue and more), and recolour saved or placed signatures any time
 - Fill PDF forms in place; Quick fill for your name, initials, address and more
 - Add text, draw, highlight, shapes, whiteout, images and stamps: move, resize and rotate; undo / redo
+- Small items like ✓ marks and dates get a finger-sized grab area; the delete button only works on a clear tap, and "Undo" brings a deleted item back
 
 **PDF tools**
 - Merge (drag to reorder), split, extract and organize pages
@@ -72,15 +83,21 @@
 - Extract text with OCR (English, German and other Latin-script languages; Hindi / Devanagari)
 - Lock with a password (AES) or remove a password
 - Watermark, page numbers, print
+- Shows progress while a file opens, and a clear message if nothing was chosen or a tool was cancelled
 
 **Your files**
 - Recently opened and recently edited, in separate tabs
 - PDFs opened from WhatsApp, Gmail or Files stay available later
 - Save over the original or as a new copy; share with size options for WhatsApp and email
+- Temporary files clean themselves up, without touching your recent files or signatures
 
 **Look**
 - Light, dark or system theme, 7 accent colours, pure black mode
-- Modern icons and layout; works on phones and tablets
+- Modern icons and layout, rounded dialogs and Docora's own message style; works on phones and tablets
+
+**Share & rate**
+- **Share Docora** from the home screen, About or Settings: sends a picture with the features, a QR code and the Play Store link to WhatsApp, Messages or any app
+- Rate Docora on Google Play from About or Settings; Google's review panel appears only occasionally, never on the first days
 
 Saved PDFs appear in the app and in **Downloads › Docora**.
 
