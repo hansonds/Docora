@@ -914,6 +914,59 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         }
     }
 
+    /** The real paragraph around the tapped line (just that line when it isn't part of one). */
+    private var typingPara: List<TextLine> = emptyList()
+
+    /**
+     * The lines around [line] that read as one paragraph. Table cells and rows are kept apart:
+     * a paragraph breaks at a ruled line, at uneven spacing, and after a line that stops well short
+     * of the others (the end of a paragraph or a cell).
+     */
+    private suspend fun paragraphOf(lay: PageLayout, line: TextLine): List<TextLine> {
+        val block = lay.blockOf(line).lines
+        if (block.size < 2) return listOf(line)
+        val g = pdf?.geoms?.getOrNull(lay.page) ?: return listOf(line)
+        val bmp = pageBitmap(lay.page, 1400)
+        val pitches = (1 until block.size).map { (block[it].baseline - block[it - 1].baseline) * g.dispH }
+        val med = pitches.sorted()[pitches.size / 2]
+        val widest = block.maxOf { it.rect.width() }
+        val breakBefore = BooleanArray(block.size)
+        for (i in 1 until block.size) {
+            val a = block[i - 1]; val b = block[i]
+            val p = pitches[i - 1]
+            val size = kotlin.math.max(a.sizePt, b.sizePt)
+            breakBefore[i] = p > size * 1.7f || kotlin.math.abs(p - med) > med * 0.25f ||
+                a.rect.width() < widest * 0.6f ||
+                (bmp != null && withContext(Dispatchers.Default) { ruleBetween(bmp, a.rect, b.rect) })
+        }
+        val at = block.indexOf(line).coerceAtLeast(0)
+        var s = at; var e = at
+        while (s > 0 && !breakBefore[s]) s--
+        while (e < block.size - 1 && !breakBefore[e + 1]) e++
+        return block.subList(s, e + 1).toList()
+    }
+
+    /** True when a drawn line (a table border) runs between two text lines. */
+    private fun ruleBetween(bmp: android.graphics.Bitmap, a: android.graphics.RectF, b: android.graphics.RectF): Boolean {
+        val w = bmp.width; val h = bmp.height
+        val x0 = (kotlin.math.min(a.left, b.left) * w).toInt().coerceIn(0, w - 1)
+        val x1 = (kotlin.math.max(a.right, b.right) * w).toInt().coerceIn(x0 + 1, w)
+        var y0 = (a.bottom * h).toInt(); var y1 = (b.top * h).toInt()
+        if (y1 <= y0) { val m = (y0 + y1) / 2; y0 = m - 1; y1 = m + 1 }
+        y0 = y0.coerceIn(0, h - 1); y1 = y1.coerceIn(y0, h - 1)
+        val row = IntArray(x1 - x0)
+        for (y in y0..y1) {
+            bmp.getPixels(row, 0, row.size, x0, y, row.size, 1)
+            var dark = 0
+            for (c in row) {
+                val lum = (Color.red(c) * 299 + Color.green(c) * 587 + Color.blue(c) * 114) / 1000
+                if (lum < 170) dark++
+            }
+            if (dark >= row.size * 0.6f) return true
+        }
+        return false
+    }
+
     private var typingBold = false
     private var typingItalic = false
 
@@ -925,7 +978,8 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
             // part of a paragraph: edit the whole paragraph, so a sentence across lines can be changed or deleted
             // (the "¶ Paragraph" chip switches back to just this line)
             val g = pdf!!.geoms[lay.page]
-            val block = lay.blockOf(line).lines
+            val block = paragraphOf(lay, line)
+            typingPara = block
             val whole = block.size > 1
             val (text, flags) = if (whole) joinLinesStyled(block) else Pair(line.text, line.charFlags)
             val item = buildReplacement(lay.page, if (whole) block else listOf(line), text, line.font, bold, italic,
@@ -1094,7 +1148,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         }
         val lay = typingLay
         val line = typingLine
-        if (typingIsNew && lay != null && line != null && lay.blockOf(line).lines.size > 1) {
+        if (typingIsNew && lay != null && line != null && typingPara.size > 1) {
             chip("¶ Paragraph", typingWhole) { setTypingWhole(!typingWhole) }
         }
         chip("Aa ${item.font.label}") { c ->
@@ -1139,7 +1193,7 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
         val line = typingLine ?: return
         val old = typing ?: return
         lifecycleScope.launch {
-            val lines = if (whole) lay.blockOf(line).lines else listOf(line)
+            val lines = if (whole && typingPara.size > 1) typingPara else listOf(line)
             val (text, flags) = if (whole) joinLinesStyled(lines) else Pair(line.text, line.charFlags)
             val g = pdf!!.geoms[lay.page]
             val item = buildReplacement(lay.page, lines, text, old.font, old.bold, old.italic,
@@ -1715,8 +1769,15 @@ class PdfEditorActivity : BaseActivity(), PdfDocView.Listener {
     }
 
     private fun flashExit() {
-        fade(btnExitFull, true)
-        fade(btnFullTranslate, true)
+        for (v in listOf(btnFullTranslate, btnExitFull)) {
+            val appearing = v.visibility != View.VISIBLE
+            fade(v, true)
+            // a small pop as they appear
+            if (appearing) {
+                v.scaleX = 0.6f; v.scaleY = 0.6f
+                v.animate().scaleX(1f).scaleY(1f).setInterpolator(android.view.animation.OvershootInterpolator(2f)).setDuration(260)
+            }
+        }
         btnExitFull.removeCallbacks(hideExit)
         btnExitFull.postDelayed(hideExit, 2600)
     }
